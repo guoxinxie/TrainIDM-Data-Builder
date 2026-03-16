@@ -145,7 +145,7 @@ Total Actions: 20000
 感谢 Android_control 数据集的作者提供 GUI 交互数据，
 为本项目的数据构建与研究提供了重要支持。
 
-* **项目地址**： https://github.com/google-research-datasets/android_control
+* **项目地址**： [https://github.com/google-research-datasets/android_control](https://console.cloud.google.com/storage/browser/gresearch/android_control)
 
 
 ### 2. Qwen-VL (通义千问-视觉大模型)
