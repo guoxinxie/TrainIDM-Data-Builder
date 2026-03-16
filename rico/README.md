@@ -13,7 +13,7 @@
 
 ### 三、下载rico_Transform.py
 
-该脚本用于处理 **RICO 数据集** (Android UI 交互轨迹)，将原始的屏幕截图和手势坐标数据 (`gestures.json`) 转换为AndroidControl数据集的action space结构化的 `(状态前, 动作, 状态后)` JSON 格式数据集。
+该脚本用于处理 **RICO的Interaction Traces数据集** (Android UI 交互轨迹)，将原始的屏幕截图和手势坐标数据 (`gestures.json`) 转换为AndroidControl数据集的action space结构化的 `(状态前, 动作, 状态后)` JSON 格式数据集。
 
 #### 处理静态规则（从上往下处理）
 
@@ -130,7 +130,104 @@ python rico_Transform.py
 ]
 ```
 
+### 下载rico_index.py
+本脚本是用于处理 **RICO的Interaction Traces数据集**，用上一步得到的rico_actions_processed.json解析、提取并转换为 **多模态大语言模型（如 Qwen-VL）微调所需的数据格式**。
+脚本会将“交互前的截图”、“交互后的截图”以及“提示词 (Prompt)”打包为用户的输入（Human），并将对应的“动作 JSON”作为模型的期望输出（GPT）。
+#### 核心功能
+1. **自动寻图机制**：遍历指定的截图根目录，根据 JSON 中的文件名为每次动作自动匹配交互前（Before）和交互后（After）的完整图片路径。
+2. **多模态 Prompt 组装**：自动在提示词前插入两个 `<image>` 占位符，符合主流多模态大模型的双图输入规范。
+3. **训练路径重写**：支持通过 `image_prefix` 配置，将本地处理时的图片绝对路径，重写为未来在 GPU 训练服务器上的绝对或相对路径。
 
+#### 参数配置
+
+在运行脚本前，请务必使用文本编辑器打开脚本，修改开头 `=== 配置 ===` 部分的路径参数，使其符合您的实际环境：
+
+```python
+# 1. 上一步生成的动作数据 JSON 路径 (请确保路径正确)
+
+rico_action_json = "/data/rico_actions_processed.json"
+
+# 2. RICO 原始截图文件的根目录 (用于本地扫描图片)
+
+trace_root = "/data/filtered_traces"
+
+# 3. 最终输出的 Qwen-VL 训练数据存放路径
+
+output_json = "/data/rico_qwenvl.json"
+
+# 4. 训练服务器上的图片根路径前缀
+# 作用：最终写入 JSON 的图片路径将是 image_prefix + 后续路径。
+# 如果您在 A 机器上处理数据，但在 B 机器上训练，请将此设置为 B 机器上的图片存放路径。
+
+image_prefix = "/data/filtered_traces"
+```
+#### 运行方法
+
+在终端或命令行中执行：
+
+```bash
+python rico_index.py
+```
+#### 生成的JSON格式
+```json
+[
+  {
+    "image": [
+      "/data/35.jpg",
+      "/data/43.jpg"
+    ],
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\n<image>\nObserve the two screenshots before and after. Output the action JSON that caused this state change."
+      },
+      {
+        "from": "gpt",
+        "value": "{\"action_type\": \"click\", \"x\": 787, \"y\": 1494}"
+      }
+    ]
+  },
+  {
+    "image": [
+      "/data/43.jpg",
+      "/data/88.jpg"
+    ],
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\n<image>\nObserve the two screenshots before and after. Output the action JSON that caused this state change."
+      },
+      {
+        "from": "gpt",
+        "value": "{\"action_type\": \"click\", \"x\": 1041, \"y\": 40}"
+      }
+    ]
+  },
+  {
+    "image": [
+      "/data/88.jpg",
+      "/data/93.jpg"
+    ],
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\n<image>\nObserve the two screenshots before and after. Output the action JSON that caused this state change."
+      },
+      {
+        "from": "gpt",
+        "value": "{\"action_type\": \"click\", \"x\": 770, \"y\": 256}"
+      }
+    ]
+  },
+...
+]
+```
+
+##  注意！！！
+
+* **路径分割依赖**：代码中使用了 `.split("filtered_traces/")[1]` 来截断路径。**请务必确保**您的 `trace_root` 路径中确实包含 `filtered_traces` 这个文件夹名称，否则脚本会在运行时报错（`IndexError`）。
+* **匹配速度**：由于 RICO 数据集图片极多，代码中目前的 `find_image` 函数使用的是遍历匹配法。如果发现生成阶段（构造样本）耗时较长，属于正常现象；若需要优化，可将 `image_map` 的键 (Key) 修改为单纯的文件名以实现 `O(1)` 的哈希查找。
+* **Prompt 修改**：如果您想让模型输出中文，或者改变模型的指令行为，请直接修改脚本中的 `human_prompt` 变量。
 
 
 
