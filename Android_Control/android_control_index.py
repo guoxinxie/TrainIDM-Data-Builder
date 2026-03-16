@@ -6,16 +6,16 @@ import io
 
 # ================= 配置 =================
 
-tfrecord_dir = "data/android_control"
+tfrecord_dir = "/data/android_control"
 
 # 输出json
-output_json = "data/android_control_qwenvl.json"
+output_json = "/data/android_control_qwenvl.json"
 
 # 图片保存目录
-save_image_dir = "data/images"
+save_image_dir = "/data/images"
 
 # 训练时的图片路径前缀
-image_prefix = "data/images"
+image_prefix = "/data/images"
 
 # human prompt
 human_prompt = (
