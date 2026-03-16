@@ -78,7 +78,16 @@ data/screenshots_jpg/
         └── ...
 ```
 #### 效果示例
-![demo]https://github.com/guoxinxie/TrainIDM-Data-Builder/blob/main/rico/filter/image/35.jpg
-![demo]https://github.com/guoxinxie/TrainIDM-Data-Builder/blob/main/rico/filter/image/image1.jpg
-![demo]https://github.com/guoxinxie/TrainIDM-Data-Builder/blob/main/rico/filter/image/700.jpg
-![demo]https://github.com/guoxinxie/TrainIDM-Data-Builder/blob/main/rico/filter/image/image.jpg
+!<p align="center">
+<img src="image/35.jpg" width="600">
+</p>
+<p align="center">
+<img src="images/image1.jpg" width="600">
+</p>
+<p align="center">
+<img src="images/700.jpg" width="600">
+</p>
+<p align="center">
+<img src="images/image.jpg" width="600">
+</p>
+
