@@ -33,10 +33,10 @@ pip install Pillow
 # =============================
 
 # 原始 RICO 数据集根目录
-rico_root = "data/filtered_traces"
+rico_root = "/data/filtered_traces"
 
 # 处理后图片的输出根目录
-output_root = "data/screenshots_jpg"
+output_root = "/data/screenshots_jpg"
 
 # 绘制手势点的半径大小（像素），调整此值可改变绘制点的大小
 POINT_RADIUS = 12
@@ -78,16 +78,18 @@ data/screenshots_jpg/
         └── ...
 ```
 #### 效果示例
-!<p align="center">
+<p align="center">
 <img src="image/35.jpg" width="600">
 </p>
 <p align="center">
-<img src="images/image1.jpg" width="600">
+<img src="image/image1.jpg" width="600">
 </p>
 <p align="center">
 <img src="images/700.jpg" width="600">
 </p>
 <p align="center">
-<img src="images/image.jpg" width="600">
+<img src="image/image.jpg" width="600">
 </p>
+
+### 下载filter_by_Gemini.py
 
