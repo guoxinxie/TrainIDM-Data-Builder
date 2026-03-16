@@ -227,9 +227,8 @@ false
 1.Gesture was a Tap on the 'ONE-WAY' tab. 
 2.mage 2 shows the 'ONE-WAY' tab selected, but the origin city has changed from 'Vancouver' to 'Kuala Lumpur'. 
 3.Logic: Tapping the 'ONE-WAY' tab should only toggle the trip type; it cannot logically change the departure city field, which requires a separate interaction.
-这个例子说明模型对识别动作成功，
-观察屏幕状态成功识别两张屏幕元素成功，
-逻辑推理成功。
 ```
-
+- 这个例子说明模型对识别动作成功，
+- 观察屏幕状态成功识别两张屏幕元素成功，
+- 逻辑推理成功。
 
