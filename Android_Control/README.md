@@ -139,3 +139,12 @@ Total Actions: 20000
 
 2.图片完整性：如果在图片解压过程中强制中断程序，该 episode_id 文件夹可能只有部分图片。再次运行时脚本会检测到文件夹存在而跳过解压，建议在重新运行时删除不完整的 images/ 文件夹。
 
+## 引用
+```text
+@article{li2024effects,
+  title={On the Effects of Data Scale on Computer Control Agents},
+  author={Li, Wei and Bishop, William and Li, Alice and Rawles, Chris and Campbell-Ajala, Folawiyo and Tyamagundlu, Divya and Riva, Oriana},
+  journal={arXiv preprint arXiv:2406.03679},
+  year={2024}
+}
+```
