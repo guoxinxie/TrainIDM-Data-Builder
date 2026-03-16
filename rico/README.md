@@ -88,7 +88,7 @@ csv_path = "/data/gui_transition_result.csv"
 python rico_Transform.py
 ```
 **运行过程说明**：
-- 1. 脚本会首先读取 CSV 文件并构建需要跳过的“黑名单”集合。
+- 1. 脚本会首先读取 CSV 文件并构建需要跳过的集合。
 - 2. 接着遍历每一个 App 和 Trace，处理图片对并解析动作。
 - 3. 终端会每处理 2000 条有效数据打印一次进度。
 - 4. 运行结束后，会在终端打印出各类动作（click, scroll 等）的最终统计数量。
