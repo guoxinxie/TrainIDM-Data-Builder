@@ -233,3 +233,27 @@ false
 - 逻辑推理成功。
 ## 注意！
 该工具还会对{35:[[ ]]},这样的无动作处理，该工具无法对无动作做判断，模型会强行解释为有动作，建议跳过无动作或者修改脚本。
+
+
+## 引用与致谢 (References)
+
+### 1. RICO 数据集
+
+本脚本处理的原始屏幕截图和交互轨迹数据均来自于 **RICO Dataset**。它是一个用于支撑数据驱动的 Android 界面设计的超大规模数据集。
+* **论文**: *Rico: A Mobile App Dataset for Building Data-Driven Design Applications (UIST 2017)*
+* **作者**: Biplab Deka, Zifeng Huang, Chad Franzen, Joshua Hibschman, Daniel Afergan, Yang Li, Jeffrey Nichols, Steven P. Dow
+* **链接**: [http://interactionmining.org/rico](http://interactionmining.org/rico)
+
+```bibtex
+@inproceedings{deka2017rico,
+  title={Rico: A mobile app dataset for building data-driven design applications},
+  author={Deka, Biplab and Huang, Zifeng and Franzen, Chad and Hibschman, Joshua and Afergan, Daniel and Li, Yang and Nichols, Jeffrey and Dow, Steven P},
+  booktitle={Proceedings of the 30th Annual ACM Symposium on User Interface Software and Technology},
+  pages={845--854},
+  year={2017}
+}
+```
+
+### 2. Qwen-VL (通义千问-视觉大模型)
+本脚本输出的 `json` 格式专门为 **Qwen-VL**（或其他采用类似 LLaVA/ShareGPT 对话格式的多模态模型）的监督微调（SFT）设计。感谢阿里云团队开源了优秀的视觉语言大模型。
+* **链接**: [https://github.com/QwenLM/Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)
