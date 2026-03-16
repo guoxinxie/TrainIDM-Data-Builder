@@ -130,7 +130,7 @@ python rico_Transform.py
 ]
 ```
 
-### 下载rico_index.py
+### 四、下载rico_index.py
 本脚本是用于处理 **RICO的Interaction Traces数据集**，用上一步得到的rico_actions_processed.json解析、提取并转换为 **多模态大语言模型（如 Qwen-VL）微调所需的数据格式**。
 脚本会将“交互前的截图”、“交互后的截图”以及“提示词 (Prompt)”打包为用户的输入（Human），并将对应的“动作 JSON”作为模型的期望输出（GPT）。
 #### 核心功能
