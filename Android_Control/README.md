@@ -61,7 +61,7 @@ open_app       : 50
 ------------------------------
 Total Actions: 20000
 ```
-##  JSON 数据格式
+##  生成的JSON 数据格式
 
 生成的 android_control_qwenvl.json 内容结构完全符合 Qwen-VL 等多模态模型的官方微调格式：
 ```json
