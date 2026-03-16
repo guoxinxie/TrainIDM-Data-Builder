@@ -2,9 +2,9 @@
 
 本工具用于对RICO的Interaction Traces数据集，进行**还原轨迹**，并**筛选出可以用于训练IDM**的样本。
 
-### 下载RICO的Interaction Traces数据集并解压至filtered_traces层
+### 一、下载RICO的Interaction Traces数据集并解压至filtered_traces层
 
-### 下载Restore_trace.py
+### 二、下载Restore_trace.py
 本脚本用于处理 RICO 数据集（或类似结构的 UI 交互数据集）。其核心功能是读取每个交互序列（trace）中的截图，并根据 `gestures.json` 文件中记录的手势坐标，在对应的截图上**可视化地绘制出用户操作（点击或滑动）**。
 
 最终，所有处理过的图片将被转换成 `.jpg` 格式并保存到指定的输出目录，同时保持原始的数据集目录结构。这对于数据分析、模型训练样本的标注或创建演示材料非常有用。
@@ -85,11 +85,11 @@ data/screenshots_jpg/
 <img src="image/image1.jpg" width="600">
 </p>
 <p align="center">
-<img src="images/700.jpg" width="600">
+<img src="image/700.jpg" width="600">
 </p>
 <p align="center">
 <img src="image/image.jpg" width="600">
 </p>
 
-### 下载filter_by_Gemini.py
+### 三、下载filter_by_Gemini.py
 
