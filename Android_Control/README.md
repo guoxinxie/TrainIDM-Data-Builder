@@ -1,4 +1,4 @@
-# Android_Control 数据集微调数据处理工具
+# Android_Control 数据集转换为多模态大语言模型数据处理工具
 
 本工具用于将 Android_Control控制数据集（TFRecord 格式）解析、提取并转换为 **多模态大语言模型（如 Qwen-VL）微调所需的数据格式**。
 
