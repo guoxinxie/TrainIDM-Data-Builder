@@ -22,7 +22,7 @@ pip install tensorflow pillow
 ##  参数配置
 
 在运行脚本前，您可以根据需要修改脚本开头的配置参数：
-code
+
 ```Python
 # ================= 配置 =================
 tfrecord_dir = "/data/android_control"              # 存放原始 TFRecord 数据集的目录
