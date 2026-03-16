@@ -78,16 +78,12 @@ data/screenshots_jpg/
         └── ...
 ```
 #### 效果示例
-<p align="left">
+<p align="center">
 <img src="image/35.jpg" width="300">
-</p>
-<p align="right">
 <img src="image/image1.jpg" width="300">
 </p>
-<p align="left">
+<p align="center">
 <img src="image/700.jpg" width="300">
-</p>
-<p align="right">
 <img src="image/image.jpg" width="300">
 </p>
 
