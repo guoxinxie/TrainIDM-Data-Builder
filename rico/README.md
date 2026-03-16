@@ -6,7 +6,7 @@
 ### 一、下载RICO的Interaction Traces数据集并解压至filtered_traces层
 
 ### 二、下载已经筛选好的gui_transition_result.csv（或者通过同目录下的filter工具微调后筛选）
-
+- filter目录下有筛除工具和逻辑
 - 筛除原因：
   - 有大量不是真正意义上的前后帧之间的动作
   - 有误触的情况
