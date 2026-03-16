@@ -138,13 +138,16 @@ Total Actions: 20000
 1.内存占用：本脚本会将所有样本 JSON 对象保存在内存中，最后一次性写入文件。如果您的数据集极其巨大（上百万条 Action），建议将 JSON 写入方式修改为按行追加（JSON Lines）。
 
 2.图片完整性：如果在图片解压过程中强制中断程序，该 episode_id 文件夹可能只有部分图片。再次运行时脚本会检测到文件夹存在而跳过解压，建议在重新运行时删除不完整的 images/ 文件夹。
+## 引用与致谢 (References & Acknowledgements)
 
-## 引用
-```text
-@article{li2024effects,
-  title={On the Effects of Data Scale on Computer Control Agents},
-  author={Li, Wei and Bishop, William and Li, Alice and Rawles, Chris and Campbell-Ajala, Folawiyo and Tyamagundlu, Divya and Riva, Oriana},
-  journal={arXiv preprint arXiv:2406.03679},
-  year={2024}
-}
-```
+### 1. Android_control 数据集
+
+感谢 Android_control 数据集的作者提供 GUI 交互数据，
+为本项目的数据构建与研究提供了重要支持。
+
+**项目地址**： https://github.com/google-research-datasets/android_control
+
+
+### 2. Qwen-VL (通义千问-视觉大模型)
+本脚本输出的 `json` 格式专门为 **Qwen-VL**（或其他采用类似 LLaVA/ShareGPT 对话格式的多模态模型）的监督微调（SFT）设计。感谢阿里云团队开源了优秀的视觉语言大模型。
+* **链接**: [https://github.com/QwenLM/Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)
