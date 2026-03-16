@@ -49,6 +49,7 @@ python android_control_index.py
 ```
 运行结束后，终端将输出动作的统计分布情况
 例如
+```bash
 ==============================
 Action Statistics
 ==============================
@@ -59,7 +60,7 @@ open_app       : 50
 ...
 ------------------------------
 Total Actions: 20000
-
+```
 ##  JSON 数据格式
 
 生成的 android_control_qwenvl.json 内容结构完全符合 Qwen-VL 等多模态模型的官方微调格式：
@@ -85,7 +86,7 @@ Total Actions: 20000
 ```
 
 ##  示例最后的目录结构
-
+```bash
 ├── android_control/             # 原始 TFRecord 目录
 ├── images/                      # 提取的图片目录
 │   ├── 1001/
@@ -96,3 +97,4 @@ Total Actions: 20000
 │   └── 1002/
 ├── process_data.py              # 本脚本
 └── android_control_qwenvl.json  # 最终生成的训练数据
+```
