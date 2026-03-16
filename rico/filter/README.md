@@ -109,7 +109,7 @@ data/screenshots_jpg/
     ```bash
     pip install requests pillow
     ```
-2.  **获取 API 密钥**: 本脚本需要使用 [OpenRouter.ai](https://openrouter.ai/) 提供的 API 密钥。您必须将此密钥设置为环境变量。
+2.  **获取 API 密钥**: 本脚本需要使用 [OpenRouter.ai](https://openrouter.ai/) 提供的 API 密钥。您可以将此密钥设置为环境变量或者设置到参数配置中。
 
 #### 参数配置
 
@@ -136,6 +136,9 @@ MAX_WORKERS = 10
 RETRY = 10
 # 重试的基础等待时间（秒），后续等待时间会指数增长
 RETRY_BASE_SLEEP = 2
+# 设置API_KEY
+API_KEY = os.environ.get("OPENROUTER_API_KEY",
+                         "YOUR_API_KEY")
 
 # 通过 OpenRouter 使用的 VLM 模型
 MODEL = "google/gemini-3.1-flash-lite-preview"
@@ -206,6 +209,8 @@ python filter_by_Gemini.py
 <img src="image/370.jpg" width="300">
 <img src="image/488.jpg" width="300">
 </p>
+
+
 ```text
 false
 1.Gesture was a Tap on the 'ONE-WAY' tab. 
@@ -214,5 +219,6 @@ false
 这个例子说明模型对识别动作成功，
 观察屏幕状态成功识别两张屏幕元素成功，
 逻辑推理成功。
-``` 
+```
+
 
