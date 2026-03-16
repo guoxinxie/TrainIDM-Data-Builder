@@ -78,5 +78,7 @@ data/screenshots_jpg/
         └── ...
 ```
 #### 效果示例
-
-
+![demo]https://github.com/guoxinxie/TrainIDM-Data-Builder/blob/main/rico/filter/image/35.jpg
+![demo]https://github.com/guoxinxie/TrainIDM-Data-Builder/blob/main/rico/filter/image/image1.jpg
+![demo]https://github.com/guoxinxie/TrainIDM-Data-Builder/blob/main/rico/filter/image/700.jpg
+![demo]https://github.com/guoxinxie/TrainIDM-Data-Builder/blob/main/rico/filter/image/image.jpg
