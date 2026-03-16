@@ -25,10 +25,10 @@ pip install tensorflow pillow
 code
 ```Python
 # ================= 配置 =================
-tfrecord_dir = "data/android_control"              # 存放原始 TFRecord 数据集的目录
-output_json = "data/android_control_qwenvl.json"   # 生成的微调 JSON 文件名称
-save_image_dir = "data/images"                     # 提取出的截图保存的本地物理路径
-image_prefix = "data/images"                       # 写入 JSON 中图片路径的前缀（需与训练时挂载路径一致）
+tfrecord_dir = "/data/android_control"              # 存放原始 TFRecord 数据集的目录
+output_json = "/data/android_control_qwenvl.json"   # 生成的微调 JSON 文件名称
+save_image_dir = "/data/images"                     # 提取出的截图保存的本地物理路径
+image_prefix = "/data/images"                       # 写入 JSON 中图片路径的前缀（需与训练时挂载路径一致）
 
 # 提问 Prompt（可根据您的训练模型需求修改）
 human_prompt = (
@@ -49,7 +49,7 @@ python android_control_index.py
 ```
 运行结束后，终端将输出动作的统计分布情况
 例如
-```bash
+```text
 ==============================
 Action Statistics
 ==============================
@@ -119,7 +119,7 @@ Total Actions: 20000
 ```
 
 ##  示例最后的目录结构
-```bash
+```text
 ├──data/
    ├── android_control/             # 原始 TFRecord 目录
    ├── images/                      # 提取的图片目录
