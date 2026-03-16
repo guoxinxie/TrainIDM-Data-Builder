@@ -68,8 +68,8 @@ Total Actions: 20000
 [
   {
     "image": [
-      "images/1001/screenshots/0.png",
-      "images/1001/screenshots/1.png"
+      "/data/images/1001/screenshots/0.png",
+      "/data/images/1001/screenshots/1.png"
     ],
     "conversations": [
       {
@@ -78,25 +78,59 @@ Total Actions: 20000
       },
       {
         "from": "gpt",
-        "value": "{\"action_type\": \"click\", \"y\": 853, \"x\": 412}"
+        "value": "{\"action_type\": \"open_app\", \"app_name\": \"Zoho Meeting\"}"
       }
     ]
-  }
+  },
+  {
+    "image": [
+      "/data/images/1001/screenshots/1.png",
+      "/data/images/1001/screenshots/2.png"
+    ],
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\n<image>\nObserve the two screenshots before and after. Output the action JSON that caused this state change."
+      },
+      {
+        "from": "gpt",
+        "value": "{\"action_type\": \"wait\"}"
+      }
+    ]
+  },
+  {
+    "image": [
+      "/data/images/1001/screenshots/2.png",
+      "/data/images/1001/screenshots/3.png"
+    ],
+    "conversations": [
+      {
+        "from": "human",
+        "value": "<image>\n<image>\nObserve the two screenshots before and after. Output the action JSON that caused this state change."
+      },
+      {
+        "from": "gpt",
+        "value": "{\"action_type\": \"click\", \"x\": 540, \"y\": 390}"
+      }
+    ]
+  },
+...
 ]
 ```
 
 ##  示例最后的目录结构
 ```bash
-├── android_control/             # 原始 TFRecord 目录
-├── images/                      # 提取的图片目录
-│   ├── 1001/
-│   │   └── screenshots/
-│   │       ├── 0.png
-│   │       ├── 1.png
-│   │       └── ...
-│   └── 1002/
-├── process_data.py              # 本脚本
-└── android_control_qwenvl.json  # 最终生成的训练数据
+├──data/
+   ├── android_control/             # 原始 TFRecord 目录
+   ├── images/                      # 提取的图片目录
+   │   ├── 1001/
+   │   │   └── screenshots/
+   │   │       ├── 0.png
+   │   │       ├── 1.png
+   │   │       └── ...
+   │   └── 1002/
+   ├── process_data.py              # 本脚本
+   └── android_control_qwenvl.json  # 最终生成的训练数据
 ```
 
 ## 注意事项
