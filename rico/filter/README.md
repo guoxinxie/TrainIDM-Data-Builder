@@ -78,17 +78,17 @@ data/screenshots_jpg/
         └── ...
 ```
 #### 效果示例
-<p align="center">
-<img src="image/35.jpg" width="600">
+<p align="left">
+<img src="image/35.jpg" width="300">
 </p>
-<p align="center">
-<img src="image/image1.jpg" width="600">
+<p align="right">
+<img src="image/image1.jpg" width="300">
 </p>
-<p align="center">
-<img src="image/700.jpg" width="600">
+<p align="left">
+<img src="image/700.jpg" width="300">
 </p>
-<p align="center">
-<img src="image/image.jpg" width="600">
+<p align="right">
+<img src="image/image.jpg" width="300">
 </p>
 
 ### 三、下载filter_by_Gemini.py
