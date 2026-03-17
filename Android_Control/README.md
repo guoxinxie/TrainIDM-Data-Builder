@@ -41,7 +41,7 @@ human_prompt = (
 ```
 
 ##  使用方法
-将您的 android_control的TFRecord 文件（支持 .gz 压缩格式）放入您修改的目录中。
+将您的 android_control的TFRecord 文件放入您修改的目录中。
 运行数据处理脚本：
 
 ```bash
@@ -129,7 +129,7 @@ Total Actions: 20000
    │   │       ├── 1.png
    │   │       └── ...
    │   └── 1002/
-   ├── process_data.py              # 本脚本
+   ├── ndroid_control_index.py              # 本脚本
    └── android_control_qwenvl.json  # 最终生成的训练数据
 ```
 
