@@ -154,14 +154,14 @@ python filter_by_Gemini.py
 ```
 脚本将开始处理数据，并在控制台打印进度。如果您中途停止脚本，下次运行时它会自动从上次中断的地方继续。
 
-#### 数据结构说明
+#### 目录结构说明
 
-##### 输入数据结构
+##### 输入目录结构
 
 脚本期望的输入数据采用以下嵌套目录结构：
 
 ```text
-<SCREENSHOT_ROOT>/
+filtered_traces/
 └── <app_name>/
     └── <trace_id>/
         ├── gestures.json
