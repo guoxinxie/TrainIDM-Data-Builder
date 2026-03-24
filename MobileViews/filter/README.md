@@ -1,7 +1,7 @@
-# GUI Transition Data Filter (IDM 数据清洗工具)
+# MobileViews GUI Transition Data Filter (mobileviews的IDM 数据清洗工具)
 
 本脚本是一个基于**视觉大语言模型 (Vision Large Language Model, VLM)** 的移动端 GUI 交互数据自动化清洗工具。
-其主要用于评估和筛选出高质量的 `(Before Screen, After Screen) -> Action` 数据对，以为训练**逆动力学模型 (Inverse Dynamics Model, IDM)** 准备高质量的数据集。
+其主要用于评估和筛选出mobileviews中高质量的 `(Before Screen, After Screen) -> Action` 数据对，以为训练**逆动力学模型 (Inverse Dynamics Model, IDM)** 准备高质量的数据集。
 
 ##  核心功能
 
@@ -14,7 +14,7 @@
 
 ---
 
-## 🛠️ 环境依赖
+##  环境依赖
 
 确保您的系统中已安装 Python。
 
@@ -30,18 +30,23 @@ pip install requests tqdm
 程序会遍历配置的 `ROOT_DIR` 目录。您的原始数据集需遵循以下结构（通常为 DroidBot/Appium 抓取工具的输出格式）：
 
 ```text
-/data/mv_trace_en/           <-- ROOT_DIR
-├── AppName_1/
-│   ├── utg.js               <-- 包含节点(nodes)和边(edges)的交互图数据
-│   ├── screen_001.jpg       <-- 截图文件 (在 utg.js 中被引用)
-│   ├── screen_002.jpg
-│   └── ...
+/data/mv_trace_en/           <-- ROOT_DIR (根目录)
+├── AppName_1/               <-- 具体的 App 文件夹
+│   ├── utg.js               <-- 交互图谱数据（包含 states 引用及 edges 动作关联）
+│   └── states/              <-- 屏幕截图存放目录
+│       ├── screen_001.jpg   <-- 具体的截图文件
+│       ├── screen_002.jpg
+│       └── ...
 ├── AppName_2/
 │   ├── utg.js
-│   ├── screen_A.jpg
-│   └── ...
+│   └── states/
+│       ├── screen_A.jpg
+│       └── ...
 ```
-*注：代码会自动解析 `utg.js` 文件，提取状态节点映射，并寻找所有触发状态转移的 Action 及对应的两张图片。*
+
+*注1：代码会自动解析 `utg.js` 文件，提取状态节点映射，并寻找所有触发状态转移的 Action 及对应的两张图片。*
+
+*注2：使用utg.js原因是因为action.csv有图片自己到自己的动作浪费算力。*
 
 ---
 
@@ -49,22 +54,29 @@ pip install requests tqdm
 
 在运行脚本前，请使用文本编辑器打开 Python 脚本，并修改开头的 `CONFIG` 字典配置：
 
-### 1. 路径配置
-- `ROOT_DIR`: 输入端原始数据集的根目录路径。
-- `OUTPUT_CSV`: 输出端 CSV 文件的保存路径（支持断点续传）。
-- `LOG_FILE`: 运行日志的保存路径，用于排查 API 错误或图片读取问题。
+  ### ================= 路径配置区 =================
+    "ROOT_DIR": "/data/mv_trace_en",  - 输入端：原始数据集的根目录。程序会遍历该目录下的各个 APP 文件夹读取 utg.js 和截图
+    "OUTPUT_CSV": "/data/filter_mv_trace.csv",  - 输出端：模型评估结果的保存路径。支持断点续传，已存在的数据会自动跳过
+    "LOG_FILE": "/data/filter_mv_trace.log",  - 日志端：运行日志保存路径，用于排查报错（如 API 异常、图片读取失败等）
 
-### 2. 模型 API 配置
-- `API_KEY`: 您的 API 密钥。如果使用本地无需鉴权的服务（如本地 vLLM），可保持为空字符串 `""`。
-- `API_URL`: 模型 API 的端点地址。
-  - *OpenRouter 示例*: `https://openrouter.ai/api/v1/chat/completions`
-  - *本地 vLLM 示例*: `http://localhost:8000/v1/chat/completions`
-- `MODEL`: 调用的具体视觉模型名称（必须支持视觉输入，例如 `qwen/qwen3.5-397b-a17b`，或 `gpt-4o`, `llava` 等）。
+  ### ================= 大模型 API 配置区 =================
+    
+    - 支持任何兼容 OpenAI 接口格式的服务（如 OpenRouter、本地部署的 vLLM、Ollama 等）
+    "API_KEY": "YOUR_API_KEY",  - 你的 API 密钥。如果使用的是本地部署的 vLLM 等无鉴权服务，保持为空字符串即可
+    "API_URL": "https://openrouter.ai/api/v1/chat/completions",
+    - API 请求地址。若使用本地 vLLM，通常改为 "http://localhost:8000/v1/chat/completions"
+    "MODEL": "qwen/qwen3.5-397b-a17b",  - 调用的具体视觉模型名称。必须与提供商（或本地部署）的模型列表名称严格一致
 
-### 3. 性能配置
-- `MAX_WORKERS`: 多线程并发数（建议根据 API 并发限制和本地网络带宽调整，默认 `10`）。
-- `REQUEST_TIMEOUT`: 单次 API 请求超时时间（单位：秒。视觉模型处理慢，建议 `>=60`）。
-- `MAX_RETRIES`: 请求失败时的最大重试次数（默认 `3`）。
+  ### ================= 性能与网络配置区 =================
+    "MAX_WORKERS": 10,  - 多线程并发数。
+    "REQUEST_TIMEOUT": 120,
+    - 注意：视觉大模型（VLM）处理两张高分辨率图片速度较慢，建议保持 60 秒或以上。
+    "MAX_RETRIES": 3,  - 单个任务失败（如网络抖动、API 暂时限流）时的最大重试次数。配合代码里的指数退避算法（等待 1, 2, 4 秒后重试）提升稳定性。
+    - PROMPT
+    "PROMPT": 
+    """
+    
+    """
 
 ---
 
@@ -86,6 +98,42 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 运行结束后，终端会打印本次运行的统计数据（总数、有效比例、无效比例及错误率）。
 
 ---
+##  输出结果示例
+
+程序运行后，会向 `OUTPUT_CSV`（如 `/data/filter_mv_trace.csv`）中追加数据。以下是生成的 CSV 文件内容的直观展示：
+
+### 示例 1：合格的高质量数据 (Valid)
+
+| 字段名 | 值示例 | 说明解析 |
+| :--- | :--- | :--- |
+| `app_name` | `com.youtube.android` | App 包名或文件夹名 |
+| `from_screen` | `state_01.jpg` | 动作发生前的界面 |
+| `to_screen` | `state_02.jpg` | 动作发生后的界面 |
+| `action` | `touch: View[id=search_icon]` | 点击了搜索图标 |
+| `valid` | **`True`** | **整体判定为合格** |
+| `action_valid` | `True` | 动作单一且目标明确可见 |
+| `causal_correct` | `True` | 点击搜索后成功跳转，因果明确 |
+| `idm_learnable` | `True` | 搜索页加载完整，特征可学习 |
+| `violations` | `[]` | 未触发任何违规规则 |
+| `reason` | `The action targets a visible search icon, leading directly to a fully rendered search page.` | 理由：动作指向可见搜索图标，直接导致完全渲染的搜索页面。 |
+
+### 示例 2：被清洗掉的无效数据 (Invalid)
+
+| 字段名 | 值示例 | 说明解析 |
+| :--- | :--- | :--- |
+| `app_name` | `com.twitter.android` | App 包名或文件夹名 |
+| `from_screen` | `state_15.jpg` | 动作发生前的界面 |
+| `to_screen` | `state_16.jpg` | 动作发生后的界面 |
+| `action` | `touch: View[bounds=[0,0][10,10]]` | 点击了左上角空白无意义区域 |
+| `valid` | **`False`** | **整体判定为不合格** |
+| `action_valid` | `False` | (触发Rule 1) 点击了空白背景 |
+| `causal_correct` | `False` | (触发Rule 4) 界面毫无变化 |
+| `idm_learnable` | `False` | (触发Rule 6) 无意义的变化 |
+| `violations` | **`[1, 4, 6]`** | **命中了第1, 4, 6条淘汰规则** |
+| `reason` | `The action targets a blank background area and results in no meaningful UI changes.` | 理由：动作针对空白背景区域，且未导致有意义的UI变化。 |
+
+---
+
 
 ##  输出文件格式 (CSV)
 
@@ -106,23 +154,80 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 
 ---
 
-##  评估规则 (Prompt 简介)
 
-程序内置了严格的 Prompt，指导 VLM 执行以下判断。只有不触发任何否定规则的样本才会被标记为 `valid: True`：
+##  详细评估规则与执行流程
 
-**必须满足 (Positive Criteria):**
-1. 动作必须明确、指向可见 UI 元素。
-2. 动作必须导致明显的 UI 变化，且符合常理的交互因果关系。
-3. 目标页面渲染完整（非加载中状态），且变化对于模型来说是“可学习”的。
+本工具的核心在于利用视觉大模型（VLM）模拟一位严谨、遵循既定流程的质量检验专家。为了保证评估结果的高度一致性和准确性，模型被强制要求遵循一个**不可更改的四步评估程序**。
 
-**触发即废弃 (Negative Rules):**
-- [Rule 1] 动作异常（空白、坐标越界、指向不可见区域）。
-- [Rule 2] 涉及手机桌面的过渡（App 启动/退出/崩溃）。
-- [Rule 3] 不符合常理的 UI 映射（如点击非破坏性按钮却弹出删除确认框）。
-- [Rule 4] 动作失效（UI 毫无变化，或变化与动作毫不相干）。
-- [Rule 5] 系统/后台干扰（弹出了系统权限框或收到后台通知）。
-- [Rule 6] 毫无意义的变化（如仅时间改变、光标闪烁）。
-- [Rule 7] 页面未加载完成（存在骨架屏、Loading 圈）。
-- [Rule 8] 无效的滑动操作。
+---
 
---- 
+### **第一步：初步评估三大准入标准**
+
+在这一阶段，模型会对交互样本进行初步的“正面评估”，判断其是否具备成为一个合格样本的基本素质。这并非最终结论，而是资格预审。
+
+1.  **动作有效性 (`action_valid`)**
+    *   **核心问题**：这个动作本身是合法的吗？
+    *   **评估内容**：动作指令是否为单一、原子化的操作？其目标（坐标或UI元素）是否在 `Screen 1` 中清晰可见且理论上可交互？
+
+2.  **因果正确性 (`causal_correct`)**
+    *   **核心问题**：这个动作是否导致了合乎逻辑的界面变化？
+    *   **评估内容**：`Screen 1` 到 `Screen 2` 是否存在由该动作直接引起的、符合移动端交互常识的视觉变化？
+
+3.  **模型可学习性 (`idm_learnable`)**
+    *   **核心问题**：这个交互结果对AI模型来说有学习价值吗？
+    *   **评估内容**：UI的变化是否足够清晰、有意义？`Screen 2` 是否是一个渲染完整、稳定的最终状态，而非加载动画或过渡帧？
+
+> **注意**：即使在这一步所有标准都初步判断为 `True`，也**不代表样本最终合格**。最终决定权在第二步的规则核查。
+
+---
+
+### **第二步：交叉核查八大淘汰规则（强制性）**
+
+这是整个流程中最关键的**“负面清单”审查**环节。模型被强制要求**独立地、无遗漏地**检查所有8条规则，**即使样本在第一步看起来完全合格也不能跳过此步骤**。
+
+*   **[Rule 1] 动作异常 (Action Error)**
+    *   **淘汰情形**：动作指令为空、包含多步操作，或指向了 `Screen 1` 中不存在的元素。最常见的是动作区域完全落在没有任何可交互元素的空白背景上。
+
+*   **[Rule 2] 桌面干扰 (No Home Screen Transitions)**
+    *   **淘汰情形**：交互的起点或终点是手机操作系统桌面（Home Screen/Launcher），例如App的启动或退出过程。这不属于App内部的交互逻辑。
+
+*   **[Rule 3] 语义错乱 (Semantic Mismatch)**
+    *   **淘汰情形**：交互结果严重违反UI设计常识。例如，点击一个“设置”图标却打开了摄像头，或者点击“返回”按钮却进入了更深一级的菜单。
+
+*   **[Rule 4] 动作失效 (Action Failure)**
+    *   **淘汰情形**：执行动作后，UI界面没有任何可辨识的变化。或者，UI的变化与动作类型完全不符（如`tap`操作导致了`scroll`效果）。
+
+*   **[Rule 5] 系统干扰 (System Interference)**
+    *   **淘汰情形**：`Screen 2` 中出现了非App本身的系统级UI元素，如权限请求对话框（麦克风、位置等）、系统警告、或来自其他App的浮动通知。
+
+*   **[Rule 6] 无意义变化 (No Meaningful Change)**
+    *   **淘汰情形**：前后两张图几乎完全相同，仅有时间、电量、输入框光标闪烁等微不足道的变化。也包括密码输入框中内容从明文变为`***`的情况，因为模型无法从视觉上学习到具体输入。
+
+*   **[Rule 7] 渲染未完成 (Incomplete Rendering)**
+    *   **淘汰情形**：`Screen 2` 明显处于加载状态，显示的是加载动画（菊花图）、骨架屏（Skeleton Screen）、白屏或内容尚未完全载入。
+
+*   **[Rule 8] 无效滑动 (Invalid Scroll)**
+    *   **淘汰情形**：执行了`scroll`动作，但页面内容没有产生清晰、连贯的位移，或者滑动幅度极小几乎无法察觉。
+
+---
+
+### **第三步：基于规则进行最终判定**
+
+这一步的逻辑非常简单且严格，直接根据第二步的核查结果做出最终裁决：
+
+*   如果**没有任何一条**淘汰规则被触发 -> 最终结果 `valid` = **`True`**。
+*   如果**任意一条或多条**淘汰规则被触发 -> 最终结果 `valid` = **`False`**。
+
+---
+
+### **第四步：确保评估结果的内部一致性**
+
+这是最后的“自检”步骤，确保输出的JSON数据是逻辑自洽的。模型必须保证第一步评估的三个标准字段与第二步触发的淘汰规则严格对应。
+
+*   **一致性要求：**
+    *   如果触发了 **[Rule 1]** -> `action_valid` 必须为 `False`。
+    *   如果触发了 **[Rule 3], [Rule 4], 或 [Rule 5]** -> `causal_correct` 必须为 `False`。
+    *   如果触发了 **[Rule 6], [Rule 7], 或 [Rule 8]** -> `idm_learnable` 必须为 `False`。
+    *   如果没有触发任何规则，则所有三个标准都必须为 `True`。
+
+这个步骤保证了输出的结构化数据是可靠且易于分析的，避免了模棱两可或自相矛盾的
