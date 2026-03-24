@@ -117,7 +117,7 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 | `from_screen_filename` | 动作发生前的屏幕截图文件名 |
 | `to_screen_filename` | 动作发生后的屏幕截图文件名 |
 | `action` | 执行的动作指令（如 `touch: View[id=btn_login]`） |
-| `valid` | **最终判定**：`True` 表示样本合格，`False` 表示不合格 |
+| `valid` | **最终判定**：`TRUE` 表示样本合格，`FALSE` 表示不合格 |
 | `action_valid` | 动作有效性（是否为单一动作且目标可见） |
 | `causal_correct` | 因果正确性（前后屏幕的变化是否由该动作引起） |
 | `idm_learnable` | IDM 可学习性（UI 变化是否有意义、渲染是否完整） |
@@ -137,10 +137,10 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 | `from_screen` | `state_01.jpg` | 动作发生前的界面 |
 | `to_screen` | `state_02.jpg` | 动作发生后的界面 |
 | `action` | `touch: View[id=search_icon]` | 点击了搜索图标 |
-| `valid` | **`True`** | **整体判定为合格** |
-| `action_valid` | `True` | 动作单一且目标明确可见 |
-| `causal_correct` | `True` | 点击搜索后成功跳转，因果明确 |
-| `idm_learnable` | `True` | 搜索页加载完整，特征可学习 |
+| `valid` | **`TRUE`** | **整体判定为合格** |
+| `action_valid` | `TRUE` | 动作单一且目标明确可见 |
+| `causal_correct` | `TRUE` | 点击搜索后成功跳转，因果明确 |
+| `idm_learnable` | `TRUE` | 搜索页加载完整，特征可学习 |
 | `violations` | `[]` | 未触发任何违规规则 |
 | `reason` | `The action targets a visible search icon, leading directly to a fully rendered search page.` | 理由：动作指向可见搜索图标，直接导致完全渲染的搜索页面。 |
 
@@ -152,10 +152,10 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 | `from_screen` | `state_15.jpg` | 动作发生前的界面 |
 | `to_screen` | `state_16.jpg` | 动作发生后的界面 |
 | `action` | `touch: View[bounds=[0,0][10,10]]` | 点击了左上角空白无意义区域 |
-| `valid` | **`False`** | **整体判定为不合格** |
-| `action_valid` | `False` | (触发Rule 1) 点击了空白背景 |
-| `causal_correct` | `False` | (触发Rule 4) 界面毫无变化 |
-| `idm_learnable` | `False` | (触发Rule 6) 无意义的变化 |
+| `valid` | **`FALSE`** | **整体判定为不合格** |
+| `action_valid` | `FALSE` | (触发Rule 1) 点击了空白背景 |
+| `causal_correct` | `FALSE` | (触发Rule 4) 界面毫无变化 |
+| `idm_learnable` | `FALSE` | (触发Rule 6) 无意义的变化 |
 | `violations` | **`[1, 4, 6]`** | **命中了第1, 4, 6条淘汰规则** |
 | `reason` | `The action targets a blank background area and results in no meaningful UI changes.` | 理由：动作针对空白背景区域，且未导致有意义的UI变化。 |
 
@@ -186,7 +186,7 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
     *   **核心问题**：这个交互结果对AI模型来说有学习价值吗？
     *   **评估内容**：UI的变化是否足够清晰、有意义？`Screen 2` 是否是一个渲染完整、稳定的最终状态，而非加载动画或过渡帧？
 
-> **注意**：即使在这一步所有标准都初步判断为 `True`，也**不代表样本最终合格**。最终决定权在第二步的规则核查。
+> **注意**：即使在这一步所有标准都初步判断为 `TRUE`，也**不代表样本最终合格**。最终决定权在第二步的规则核查。
 
 ---
 
@@ -224,8 +224,8 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 
 这一步的逻辑非常简单且严格，直接根据第二步的核查结果做出最终裁决：
 
-*   如果**没有任何一条**淘汰规则被触发 -> 最终结果 `valid` = **`True`**。
-*   如果**任意一条或多条**淘汰规则被触发 -> 最终结果 `valid` = **`False`**。
+*   如果**没有任何一条**淘汰规则被触发 -> 最终结果 `valid` = **`TRUE`**。
+*   如果**任意一条或多条**淘汰规则被触发 -> 最终结果 `valid` = **`FALSE`**。
 
 ---
 
@@ -234,9 +234,9 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 这是最后的“自检”步骤，确保输出的JSON数据是逻辑自洽的。模型必须保证第一步评估的三个标准字段与第二步触发的淘汰规则严格对应。
 
 *   **一致性要求：**
-    *   如果触发了 **[Rule 1]** -> `action_valid` 必须为 `False`。
-    *   如果触发了 **[Rule 3], [Rule 4], 或 [Rule 5]** -> `causal_correct` 必须为 `False`。
-    *   如果触发了 **[Rule 6], [Rule 7], 或 [Rule 8]** -> `idm_learnable` 必须为 `False`。
-    *   如果没有触发任何规则，则所有三个标准都必须为 `True`。
+    *   如果触发了 **[Rule 1]** -> `action_valid` 必须为 `FALSE`。
+    *   如果触发了 **[Rule 3], [Rule 4], 或 [Rule 5]** -> `causal_correct` 必须为 `FALSE`。
+    *   如果触发了 **[Rule 6], [Rule 7], 或 [Rule 8]** -> `idm_learnable` 必须为 `FALSE`。
+    *   如果没有触发任何规则，则所有三个标准都必须为 `TRUE`。
 
 这个步骤保证了输出的结构化数据是可靠且易于分析的，避免了模棱两可或自相矛盾的
