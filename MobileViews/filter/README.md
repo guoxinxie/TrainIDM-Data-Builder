@@ -1,4 +1,4 @@
-# MobileViews GUI Transition Data Filter (mobileviews的IDM 数据清洗工具)
+# MobileViews GUI Transition Data Filter (mobileviews数据集的IDM 数据清洗工具)
 
 本脚本是一个基于**视觉大语言模型 (Vision Large Language Model, VLM)** 的移动端 GUI 交互数据自动化清洗工具。
 其主要用于评估和筛选出mobileviews中高质量的 `(Before Screen, After Screen) -> Action` 数据对，以为训练**逆动力学模型 (Inverse Dynamics Model, IDM)** 准备高质量的数据集。
