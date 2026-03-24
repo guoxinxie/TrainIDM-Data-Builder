@@ -3,25 +3,9 @@
 本脚本是一个基于**视觉大语言模型 (Vision Large Language Model, VLM)** 的移动端 GUI 交互数据自动化清洗工具。
 其主要用于评估和筛选出mobileviews中高质量的 `(Before Screen, After Screen) -> Action` 数据对，以为训练**逆动力学模型 (Inverse Dynamics Model, IDM)** 准备高质量的数据集。
 
-##  核心功能
-
--  **智能视觉分析**：结合前/后两张屏幕截图和动作指令，利用视觉大模型自动判断交互动作的有效性、因果关系及可学习性。
--  **高并发处理**：基于多线程 (`ThreadPoolExecutor`) 实现，大幅提升海量数据的处理速度。
--  **断点续传支持**：自动读取已生成的 CSV 文件，跳过已处理的数据，随时中断和恢复任务而不会丢失进度。
--  **高可用与容错**：内置 API 请求指数退避（Exponential Backoff）重试机制，从容应对网络抖动和 API 限流。
--  **全量 API 兼容**：支持任何兼容 OpenAI 接口格式的模型服务，包括但不限于 OpenRouter、本地部署的 vLLM。
--  **严格的结果结构化**：通过精心设计的 Prompt 强制模型输出标准 JSON 格式，并输出详细的评估理由和违规规则编号。
-
 ---
 
-##  环境依赖
-
-确保您的系统中已安装 Python。
-
-安装所需依赖包：
-```bash
-pip install requests tqdm
-```
+# 下载filter_trace.py和mobileviews数据集并解压
 
 ---
 
@@ -49,6 +33,29 @@ pip install requests tqdm
 *注2：使用utg.js原因是因为action.csv有图片自己到自己的动作浪费算力。*
 
 ---
+
+##  核心功能
+
+-  **智能视觉分析**：结合前/后两张屏幕截图和动作指令，利用视觉大模型自动判断交互动作的有效性、因果关系及可学习性。
+-  **高并发处理**：基于多线程 (`ThreadPoolExecutor`) 实现，大幅提升海量数据的处理速度。
+-  **断点续传支持**：自动读取已生成的 CSV 文件，跳过已处理的数据，随时中断和恢复任务而不会丢失进度。
+-  **高可用与容错**：内置 API 请求指数退避（Exponential Backoff）重试机制，从容应对网络抖动和 API 限流。
+-  **全量 API 兼容**：支持任何兼容 OpenAI 接口格式的模型服务，包括但不限于 OpenRouter、本地部署的 vLLM。
+-  **严格的结果结构化**：通过精心设计的 Prompt 强制模型输出标准 JSON 格式，并输出详细的评估理由和违规规则编号。
+
+---
+
+##  环境依赖
+
+确保您的系统中已安装 Python。
+
+安装所需依赖包：
+```bash
+pip install requests tqdm
+```
+
+---
+
 
 ##  配置说明
 
@@ -85,7 +92,7 @@ pip install requests tqdm
 配置完成后，直接运行 Python 脚本：
 
 ```bash
-python filter_mv_trace.py
+python filter_trace.py
 ```
 
 ### 运行监控
