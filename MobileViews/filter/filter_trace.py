@@ -67,7 +67,7 @@ Step 1: Evaluate the three criteria (action_valid, causal_correct, idm_learnable
 
 Step 2: Independently check ALL violation rules (Rule 1–8), do NOT skip any rule
 
-Step 3: If ANY rule is triggered → valid = false
+Step 3: If ANY rule is triggered → valid = FALSE
 
 Step 4: Ensure criteria fields are consistent with triggered violations
 
@@ -150,11 +150,11 @@ If the mapping is highly unusual or contradicts standard UI behavior, mark INVAL
 DECISION LOGIC
 
 - If NO rules are triggered:
-  valid = true
+  valid = TRUE
   violations = []
 
 - If ANY rule is triggered:
-  valid = false
+  valid = FALSE
   violations must include ALL matched rule IDs (e.g., [3], [1, 4])
 
 --------------------------------------------------
@@ -163,11 +163,11 @@ CRITERIA CONSISTENCY RULE (STRICT)
 
 The criteria fields MUST align with violations:
 
-- If Rule 1 triggered → action_valid = false
-- If Rule 3, 4, or 5 triggered → causal_correct = false
-- If Rule 6, 7, or 8 triggered → idm_learnable = false
+- If Rule 1 triggered → action_valid = FALSE
+- If Rule 3, 4, or 5 triggered → causal_correct = FALSE
+- If Rule 6, 7, or 8 triggered → idm_learnable = FALSE
 
-If no rule is triggered → all criteria must be true
+If no rule is triggered → all criteria must be TRUE
 
 --------------------------------------------------
 
@@ -177,11 +177,11 @@ You MUST return a valid JSON object ONLY.
 Do NOT include markdown, explanations, or extra text.
 
 {
-  "valid": true or false,
+  "valid": TRUE or FALSE,
   "criteria": {
-    "action_valid": true or false,
-    "causal_correct": true or false,
-    "idm_learnable": true or false
+    "action_valid": TRUE or FALSE,
+    "causal_correct": TRUE or FALSE,
+    "idm_learnable": TRUE or FALSE
   },
   "violations": [],
   "reason": "A concise 1-2 sentence explanation referencing visible UI evidence"
@@ -439,7 +439,7 @@ def main():
                         writer.writerow(row_result)
                     status = (
                         " Valid" if row_result.get("valid")
-                        else " Invalid" if row_result.get("valid") is False
+                        else " Invalid" if row_result.get("valid") is FALSE
                         else " Error"
                     )
                     pbar.set_postfix_str(status)
@@ -448,7 +448,7 @@ def main():
 
     # 3. 最终统计
     stats_valid = sum(1 for r in results_for_stats if r.get("valid"))
-    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is False)
+    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is FALSE)
     stats_error = new_tasks_count - stats_valid - stats_invalid
 
     # --- 日志输出部分 ---
