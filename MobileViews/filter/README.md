@@ -98,6 +98,26 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 运行结束后，终端会打印本次运行的统计数据（总数、有效比例、无效比例及错误率）。
 
 ---
+
+
+##  输出文件格式 (CSV)
+
+结果将追加写入到您配置的 `OUTPUT_CSV` 文件中，包含以下字段：
+
+| 字段名 | 说明 |
+| :--- | :--- |
+| `app_name` | 应用程序名称（文件夹名） |
+| `from_screen_filename` | 动作发生前的屏幕截图文件名 |
+| `to_screen_filename` | 动作发生后的屏幕截图文件名 |
+| `action` | 执行的动作指令（如 `touch: View[id=btn_login]`） |
+| `valid` | **最终判定**：`True` 表示样本合格，`False` 表示不合格 |
+| `action_valid` | 动作有效性（是否为单一动作且目标可见） |
+| `causal_correct` | 因果正确性（前后屏幕的变化是否由该动作引起） |
+| `idm_learnable` | IDM 可学习性（UI 变化是否有意义、渲染是否完整） |
+| `violations` | 触发的违规规则 ID 列表（合格样本为空 `[]`） |
+| `reason` | 模型给出的判定理由（1-2句简述） |
+
+---
 ##  输出结果示例
 
 程序运行后，会向 `OUTPUT_CSV`（如 `/data/filter_mv_trace.csv`）中追加数据。以下是生成的 CSV 文件内容的直观展示：
@@ -135,24 +155,6 @@ Evaluating New Transitions:  35%|███▌      | 350/1000 [02:15<04:30,  2.4
 ---
 
 
-##  输出文件格式 (CSV)
-
-结果将追加写入到您配置的 `OUTPUT_CSV` 文件中，包含以下字段：
-
-| 字段名 | 说明 |
-| :--- | :--- |
-| `app_name` | 应用程序名称（文件夹名） |
-| `from_screen_filename` | 动作发生前的屏幕截图文件名 |
-| `to_screen_filename` | 动作发生后的屏幕截图文件名 |
-| `action` | 执行的动作指令（如 `touch: View[id=btn_login]`） |
-| `valid` | **最终判定**：`True` 表示样本合格，`False` 表示不合格 |
-| `action_valid` | 动作有效性（是否为单一动作且目标可见） |
-| `causal_correct` | 因果正确性（前后屏幕的变化是否由该动作引起） |
-| `idm_learnable` | IDM 可学习性（UI 变化是否有意义、渲染是否完整） |
-| `violations` | 触发的违规规则 ID 列表（合格样本为空 `[]`） |
-| `reason` | 模型给出的判定理由（1-2句简述） |
-
----
 
 
 ##  详细评估规则与执行流程
