@@ -127,9 +127,9 @@ If the mapping is highly unusual or contradicts standard UI behavior, mark INVAL
 - The result is logically inconsistent with the action
 - Example: tap causes scroll, or one tap updates multiple unrelated components
 
-[Rule 5] System or Background Interference
-- OS-level UI appears (permission dialogs, system alerts, notifications)
-- UI changes due to unrelated external/background events
+[Rule 5] Unrelated System or Background Interference
+- The UI change is caused by an external event unrelated to the user's action (e.g., a low battery alert, an incoming call, or a notification from another app).
+- Exception: An OS-level UI, such as a permission dialog, that appears as the direct and logical result of the user's action is considered **VALID**.
 
 [Rule 6] No Meaningful Change / Unlearnable Feedback
 - Screen 1 and Screen 2 are nearly identical
