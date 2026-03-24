@@ -184,7 +184,7 @@ Do NOT include markdown, explanations, or extra text.
     "idm_learnable": TRUE or FALSE
   },
   "violations": [],
-  "reason": "A concise 1-2 sentence explanation referencing visible UI evidence"
+  "reason": "A concise 1-3 sentence explanation referencing visible UI evidence"
 }
 
 --------------------------------------------------
