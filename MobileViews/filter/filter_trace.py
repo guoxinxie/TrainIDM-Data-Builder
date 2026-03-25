@@ -67,7 +67,7 @@ Step 1: Evaluate the three criteria (action_valid, causal_correct, idm_learnable
 
 Step 2: Independently check ALL violation rules (Rule 1–8), do NOT skip any rule
 
-Step 3: If ANY rule is triggered → valid = FALSE
+Step 3: If ANY rule is triggered → valid = false
 
 Step 4: Ensure criteria fields are consistent with triggered violations
 
@@ -154,7 +154,7 @@ DECISION LOGIC
   violations = []
 
 - If ANY rule is triggered:
-  valid = FALSE
+  valid = false
   violations must include ALL matched rule IDs (e.g., [3], [1, 4])
 
 --------------------------------------------------
@@ -163,9 +163,9 @@ CRITERIA CONSISTENCY RULE (STRICT)
 
 The criteria fields MUST align with violations:
 
-- If Rule 1 triggered → action_valid = FALSE
-- If Rule 3, 4, or 5 triggered → causal_correct = FALSE
-- If Rule 6, 7, or 8 triggered → idm_learnable = FALSE
+- If Rule 1 triggered → action_valid = false
+- If Rule 3, 4, or 5 triggered → causal_correct = false
+- If Rule 6, 7, or 8 triggered → idm_learnable = false
 
 If no rule is triggered → all criteria must be true
 
@@ -177,11 +177,11 @@ You MUST return a valid JSON object ONLY.
 Do NOT include markdown, explanations, or extra text.
 
 {
-  "valid": true or FALSE,
+  "valid": true or false,
   "criteria": {
-    "action_valid": true or FALSE,
-    "causal_correct": true or FALSE,
-    "idm_learnable": true or FALSE
+    "action_valid": true or false,
+    "causal_correct": true or false,
+    "idm_learnable": true or false
   },
   "violations": [],
   "reason": "A concise 1-3 sentence explanation referencing visible UI evidence"
@@ -439,7 +439,7 @@ def main():
                         writer.writerow(row_result)
                     status = (
                         " Valid" if row_result.get("valid")
-                        else " Invalid" if row_result.get("valid") is False
+                        else " Invalid" if row_result.get("valid") is false
                         else " Error"
                     )
                     pbar.set_postfix_str(status)
@@ -448,7 +448,7 @@ def main():
 
     # 3. 最终统计
     stats_valid = sum(1 for r in results_for_stats if r.get("valid"))
-    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is False)
+    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is false)
     stats_error = new_tasks_count - stats_valid - stats_invalid
     # ================= 动作级别统计 =================
 
@@ -475,7 +475,7 @@ def main():
 
         if r.get("valid") is true:
             action_stats[action_type]["valid"] += 1
-        elif r.get("valid") is False:
+        elif r.get("valid") is false:
             action_stats[action_type]["invalid"] += 1
         else:
             action_stats[action_type]["error"] += 1
