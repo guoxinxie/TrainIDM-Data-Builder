@@ -1,43 +1,38 @@
-import os
-import json
-import csv
+import argparse
 import base64
-import requests
+import csv
+import json
+import logging
+import os
 import re
 import time
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-from tqdm import tqdm
+from io import BytesIO
 
 # --- 配置区 ---
 CONFIG = {
     # ================= 路径配置区 =================
-    "ROOT_DIR": "/data/mv_trace_en",  # 输入端：原始数据集的根目录。程序会遍历该目录下的各个 APP 文件夹读取 utg.js 和截图
-    "OUTPUT_CSV": "/data/filter_mv_trace.csv",  # 输出端：模型评估结果的保存路径。支持断点续传，已存在的数据会自动跳过
-    "LOG_FILE": "/data/filter_mv_trace.log",  # 日志端：运行日志保存路径，用于排查报错（如 API 异常、图片读取失败等）
+    "ROOT_DIR": "./mv_trace_en",  # 输入端：原始数据集的根目录。程序会遍历该目录下的各个 APP 文件夹读取 utg.js 和截图
+    "OUTPUT_CSV": "./filter_mv_trace.csv",  # 输出端：模型评估结果的保存路径。支持断点续传，已存在的数据会自动跳过
+    "LOG_FILE": "./filter_mv_trace.log",  # 日志端：运行日志保存路径，用于排查报错（如 API 异常、图片读取失败等）
 
     # ================= 大模型 API 配置区 =================
     # 支持任何兼容 OpenAI 接口格式的服务（如 OpenRouter、本地部署的 vLLM、Ollama 等）
-    "API_KEY": "YOUR_API_KEY",  # 你的 API 密钥。如果使用的是本地部署的 vLLM 等无鉴权服务，保持为空字符串即可
+    "API_KEY": os.getenv("API_KEY", ""),  # 从环境变量 API_KEY 读取；本地无鉴权服务可留空
     "API_URL": "https://openrouter.ai/api/v1/chat/completions",
     # API 请求地址。若使用本地 vLLM，通常改为 "http://localhost:8000/v1/chat/completions"
     "MODEL": "qwen/qwen3.5-397b-a17b",  # 调用的具体视觉模型名称。必须与提供商（或本地部署）的模型列表名称严格一致
 
     # ================= 性能与网络配置区 =================
-    "MAX_WORKERS": 10,  # 多线程并发数。
-    "REQUEST_TIMEOUT": 120,
-    #  注意：视觉大模型（VLM）处理两张高分辨率图片速度较慢，建议保持 60 秒或以上。
+    "MAX_WORKERS": 5,  # 并发处理的 APP 文件夹线程数。
+    "MAX_VALID_SAMPLES_PER_APP": 5,  # 每个 APP 最多保留多少条 valid=True 的样本。
+    "LARGE_TRAJECTORY_THRESHOLD": 12,  # 当候选步数达到该阈值时，启用最小步距约束。
+    "MIN_STEP_MARGIN": 2,  # 大轨迹下，已选样本之间的最小步距（按轨迹顺序索引计算）。
+    "REQUEST_TIMEOUT": 120,  #  注意：视觉大模型（VLM）处理两张高分辨率图片速度较慢，建议保持 60 秒或以上。
     "MAX_RETRIES": 3,  # 单个任务失败（如网络抖动、API 暂时限流）时的最大重试次数。配合代码里的指数退避算法（等待 1, 2, 4 秒后重试）提升稳定性。
     # PROMPT
     "PROMPT": """
-ROLE & TASK
-You are an expert AI data filter specializing in mobile GUI analysis. Your task is to evaluate GUI transition pairs and determine whether they are high-quality samples for training/evaluating an Inverse Dynamics Model (IDM).
-
-An IDM learns:
-(Screen 1, Screen 2) → Action
-
-Your goal is to STRICTLY retain only clean, causal, semantically correct, and visually learnable interactions.
+You are an expert AI data filter specializing in mobile GUI analysis. Your task is to evaluate GUI transition pairs and determine whether they are high-quality samples for training/evaluating an Inverse Dynamics Model (IDM). An IDM infers the action that causes the GUI state transition, given two consecutive screens as the input.
 
 --------------------------------------------------
 
@@ -45,158 +40,85 @@ INPUT
 You will receive:
 [Screen 1]: The GUI state before the action
 [Screen 2]: The GUI state after the action
-[Action]: The user operation performed
+[Action]: The user operation performed, including
 (touch,intent,scroll,long_touch,set_text,kill_app,select,unselect,wait_user_login).
+If [Action] includes a bounding box, [Screen 1] may contain a red overlay box highlighting that action region.
 
 --------------------------------------------------
 
 GLOBAL VISUAL RULES
 
 - Ignore system status/navigation bar changes (time, battery, signal, etc.)
-- Ignore minor dynamic updates (ads refresh, timestamps, background feeds)
-- Focus ONLY on meaningful UI changes within the app
+- Ignore dynamic updates incurred by ads refresh, timestamps, background feeds, etc.
+- Focus ONLY on meaningful GUI changes within the app that are caused by the performed action
 - Do NOT assume hidden steps or intermediate actions
 - Do NOT infer invisible interactions; rely ONLY on visible UI evidence
 
 --------------------------------------------------
-EVALUATION PROCEDURE (MANDATORY)
 
-You MUST follow this exact order:
+EVALUATION PROCEDURE & RULES
 
-Step 1: Evaluate the three criteria (action_valid, causal_correct, idm_learnable)
-
-Step 2: Independently check ALL violation rules (Rule 1–8), do NOT skip any rule
-
-Step 3: If ANY rule is triggered → valid = false
-
-Step 4: Ensure criteria fields are consistent with triggered violations
-
-Do NOT skip Step 2 even if the sample appears valid.
-
---------------------------------------------------
-PART 1: WHAT WE NEED (POSITIVE CRITERIA)
-
-A VALID sample MUST satisfy ALL of the following:
+Rely ONLY on visible UI evidence. Do not assume hidden steps. You MUST evaluate the sample against the following criteria and their associated violation rules. Check ALL rules; do not skip any.
 
 1. Action Validity (action_valid)
-- The action is a single, atomic interaction (NOT a sequence).
-- The action targets a visible and interactable UI element in Screen 1.
-- **Spatial Tolerance:** The targeted region (bounding box/coordinates) may be larger than the actual visual icon or text due to invisible touch padding. As long as a clear interactable element (like an icon, button, or input field) is present within, or significantly overlaps with the targeted region, it is considered VALID. Do not reject it just because the action area includes some empty space around the icon.
+The action must be a single, atomic interaction. Spatial Tolerance: It is VALID if the action area significantly overlaps with an interactable element, even if it includes surrounding empty space.
+
+[Rule 1] Invalid Action: Action is missing, multi-step, ambiguous, targets elements not visible in Screen 1, or the action area is entirely on a blank background with no nearby elements.
 
 2. Causal Correctness (causal_correct)
-- A clear UI change exists between Screen 1 and Screen 2
-- The change is the direct and immediate result of the action
-- The transition follows common mobile UI interaction conventions
+There must be a clear UI change that is the direct, logical result of the action.
+
+[Rule 2] Home Screen Transition: Screen 1 is the mobile OS home screen (app launch), or Screen 2 is the home screen (app exit/crash).
+
+[Rule 3] Illogical Mapping / No Result: The UI does not change, or the result violates standard mobile UI conventions (e.g., tap causes scroll, non-destructive action yields destructive warning, "three dots" doesn't open a menu).
+
+[Rule 4] Unrelated Interference: The UI change is caused by ads, dynamic background feeds, low battery, or unrelated notifications. (Exception: OS-level permission dialogs directly triggered by the action are VALID).
 
 3. IDM Learnability (idm_learnable)
-- The UI change is meaningful and non-trivial
-- Screen 2 is fully rendered, stable, and not mid-transition
-- The mapping from action → visual result is clear and unambiguous
 
---------------------------------------------------
+The UI change must be stable, unambiguous, and meaningful for learning.
 
-PART 2: WHAT WE MUST FILTER OUT (NEGATIVE RULES)
+[Rule 5] Trivial Change: Screens are nearly identical. Changes are limited to ignored system bar updates (time/battery), cursor blinks, minor animations, or masked text (e.g., passwords as ***).
 
-If ANY rule below is triggered → the sample is INVALID
+[Rule 6] Incomplete Rendering: Screen 2 shows loading spinners, skeleton screens, or is caught mid-transition.
 
-[Rule 1] Action Error
-- Action is missing, empty, or None
-- Action contains multiple steps (not atomic)
-- Action targets elements not visible in Screen 1 (temporal mismatch)
-- Action area is ENTIRELY on a blank background with NO interactable elements inside or near it.
-- Action target is ambiguous or not clearly identifiable
+[Rule 7] Invalid Scroll: A scroll action results in minimal, ambiguous, or inconsistent content displacement.
 
-[Rule 2] No Home Screen Transitions
-- Screen 1 is the mobile OS home/launcher screen (app launch)
-- Screen 2 is the home screen (app exit, crash, or go-home action)
+DECISION LOGIC & STRICT CONSISTENCY
 
-[Rule 3] Unnatural Mapping / Semantic Mismatch
-- The result violates common mobile UI interaction conventions
-- The action-result mapping is illogical, highly unusual, or unlikely in real apps
+If NO rules are triggered: valid = true, violations = [], and all criteria fields = true.
+If ANY rule is triggered: valid = false, list ALL triggered rule IDs in violations.
+Consistency: Criteria fields MUST be false if their corresponding rules are triggered:
+- If Rule 1 triggered -> action_valid = false
+- If Rule 2, 3, or 4 triggered -> causal_correct = false
+- If Rule 5, 6, or 7 triggered -> idm_learnable = false
 
-Examples:
-- "More options" (three-dot menu) does NOT open a menu
-- A non-destructive action triggers a destructive confirmation dialog
-- A standard UI element leads to an unrelated function
+OUTPUT FORMAT
 
-IMPORTANT:
-If the mapping is highly unusual or contradicts standard UI behavior, mark INVALID even if a UI change exists
-
-[Rule 4] Action Failure / Illogical Result
-- The UI does not change after the action
-- The result is logically inconsistent with the action
-- Example: tap causes scroll, or one tap updates multiple unrelated components
-
-[Rule 5] Unrelated System or Background Interference
-- The UI change is caused by an external event unrelated to the user's action (e.g., a low battery alert, an incoming call, or a notification from another app).
-- Exception: An OS-level UI, such as a permission dialog, that appears as the direct and logical result of the user's action is considered **VALID**.
-
-[Rule 6] No Meaningful Change / Unlearnable Feedback
-- Screen 1 and Screen 2 are nearly identical
-- Only trivial differences (cursor blink, minor animation, tiny shifts)
-- Changes are not meaningful for learning action-to-UI mapping
-- Masked or hidden content (e.g., passwords shown as ***)
-
-[Rule 7] Incomplete Rendering
-- Screen 2 shows loading states, spinners, skeleton screens, or blank UI
-- UI is not fully rendered or stable
-
-[Rule 8] Invalid Scroll
-- Scroll action does not produce clear and consistent content displacement
-- Movement is minimal, ambiguous, or inconsistent
-
---------------------------------------------------
-
-DECISION LOGIC
-
-- If NO rules are triggered:
-  valid = true
-  violations = []
-
-- If ANY rule is triggered:
-  valid = false
-  violations must include ALL matched rule IDs (e.g., [3], [1, 4])
-
---------------------------------------------------
-
-CRITERIA CONSISTENCY RULE (STRICT)
-
-The criteria fields MUST align with violations:
-
-- If Rule 1 triggered → action_valid = false
-- If Rule 3, 4, or 5 triggered → causal_correct = false
-- If Rule 6, 7, or 8 triggered → idm_learnable = false
-
-If no rule is triggered → all criteria must be true
-
---------------------------------------------------
-
-CRITICAL OUTPUT FORMAT
-
-You MUST return a valid JSON object ONLY.
-Do NOT include markdown, explanations, or extra text.
-
+Return a valid JSON object ONLY. Do NOT include markdown formatting (like ```json), explanations, or extra text.
 {
-  "valid": true or false,
-  "criteria": {
-    "action_valid": true or false,
-    "causal_correct": true or false,
-    "idm_learnable": true or false
-  },
-  "violations": [],
-  "reason": "A concise 1-3 sentence explanation referencing visible UI evidence"
+    "valid": true | false,
+    "criteria": {
+    "action_valid": true | false,
+    "causal_correct": true | false,
+    "idm_learnable": true | false
+    },
+    "violations":[rule_ids],
+    "reason": "1-2 concise sentences grounded in visible UI evidence."
 }
 
---------------------------------------------------
-
-FINAL INSTRUCTION
-
-Be strict, conservative, and precise.
-Only retain high-confidence, semantically correct, and learnable samples.
-If anything is ambiguous, unusual, or weakly justified → mark INVALID.
-
+A sample output looks like:
+{
+    "valid": false,
+    "criteria": {
+    "action_valid": true,
+    "causal_correct": true,
+    "idm_learnable": false
+    },
+    "violations":[6, 7],
+    "reason": "..."
+}
 """
-
 }
 
 # --- 日志配置 ---
@@ -204,14 +126,16 @@ logger = logging.getLogger(__name__)
 
 
 def setup_logging():
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     if logger.hasHandlers():
         logger.handlers.clear()
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
     ch.setFormatter(formatter)
     logger.addHandler(ch)
     fh = logging.FileHandler(CONFIG["LOG_FILE"], mode='w', encoding='utf-8')
+    fh.setLevel(logging.DEBUG)
     fh.setFormatter(formatter)
     logger.addHandler(fh)
 
@@ -225,6 +149,84 @@ def encode_image(image_path):
     except Exception as e:
         logger.error(f"Reading image failed {image_path}: {e}")
         return None
+
+
+def extract_bbox_from_action(action):
+    if not isinstance(action, str):
+        return None
+
+    match = re.search(
+        r"(?:bound_box|bounding_box|bbox)\s*=\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)\s*,\s*([0-9]+)",
+        action,
+        flags=re.IGNORECASE
+    )
+    if not match:
+        return None
+
+    x1, y1, x2, y2 = (int(match.group(i)) for i in range(1, 5))
+    left, right = sorted((x1, x2))
+    top, bottom = sorted((y1, y2))
+    if left == right or top == bottom:
+        return None
+    return left, top, right, bottom
+
+
+def _render_image_with_bbox_overlay(image_path, bbox):
+    from PIL import Image, ImageDraw
+
+    with Image.open(image_path) as img:
+        canvas = img.convert("RGB")
+        width, height = canvas.size
+
+        left, top, right, bottom = bbox
+        left = max(0, min(left, width - 1))
+        right = max(0, min(right, width - 1))
+        top = max(0, min(top, height - 1))
+        bottom = max(0, min(bottom, height - 1))
+        if left >= right or top >= bottom:
+            raise ValueError("Bounding box is outside image bounds or has invalid area.")
+
+        rgba = canvas.convert("RGBA")
+        overlay = Image.new("RGBA", rgba.size, (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+
+        line_width = max(6, min(width, height) // 120)
+        corner_len = max(20, line_width * 3)
+
+        # Make target region easy to notice even on busy UIs.
+        draw.rectangle([left, top, right, bottom], fill=(255, 0, 0, 45))
+
+        # High-contrast double border.
+        draw.rectangle([left, top, right, bottom], outline=(0, 0, 0, 255), width=line_width + 2)
+        draw.rectangle([left, top, right, bottom], outline=(255, 0, 0, 255), width=line_width)
+
+        # Corner marks.
+        draw.line([(left, top), (left + corner_len, top)], fill=(255, 0, 0, 255), width=line_width)
+        draw.line([(left, top), (left, top + corner_len)], fill=(255, 0, 0, 255), width=line_width)
+        draw.line([(right, top), (right - corner_len, top)], fill=(255, 0, 0, 255), width=line_width)
+        draw.line([(right, top), (right, top + corner_len)], fill=(255, 0, 0, 255), width=line_width)
+        draw.line([(left, bottom), (left + corner_len, bottom)], fill=(255, 0, 0, 255), width=line_width)
+        draw.line([(left, bottom), (left, bottom - corner_len)], fill=(255, 0, 0, 255), width=line_width)
+        draw.line([(right, bottom), (right - corner_len, bottom)], fill=(255, 0, 0, 255), width=line_width)
+        draw.line([(right, bottom), (right, bottom - corner_len)], fill=(255, 0, 0, 255), width=line_width)
+
+        merged = Image.alpha_composite(rgba, overlay).convert("RGB")
+        return merged, (left, top, right, bottom)
+
+
+def encode_screen1_with_action_bbox(image_path, action):
+    bbox = extract_bbox_from_action(action)
+    if bbox is None:
+        return encode_image(image_path), None
+
+    try:
+        merged, normalized_bbox = _render_image_with_bbox_overlay(image_path, bbox)
+        buffer = BytesIO()
+        merged.save(buffer, format="JPEG", quality=95)
+        return base64.b64encode(buffer.getvalue()).decode("utf-8"), normalized_bbox
+    except Exception as e:
+        logger.warning(f"Failed to overlay bbox on Screen 1 ({image_path}): {e}. Falling back to original image.")
+        return encode_image(image_path), None
 
 
 def load_utg(utg_path):
@@ -243,7 +245,23 @@ def extract_action(event):
     return f"{event.get('event_type', '')}: {event.get('event_str', '')}"
 
 
+def should_process_event(event):
+    """
+    Event-level sampling filter. Return True to keep the event.
+    Add new rules here when needed.
+    """
+    event_type = str(event.get("event_type", "")).strip().lower()
+
+    blocked_event_types = {"intent", "kill_app", "wait_user_login"}
+    if event_type in blocked_event_types:
+        return False
+
+    return True
+
+
 def call_model(messages):
+    import requests
+
     for attempt in range(CONFIG["MAX_RETRIES"]):
         try:
             headers = {"Content-Type": "application/json"}
@@ -252,24 +270,81 @@ def call_model(messages):
             response = requests.post(
                 url=CONFIG["API_URL"],
                 headers=headers,
-                data=json.dumps({"model": CONFIG["MODEL"], "messages": messages}),
+                data=json.dumps({
+                    "model": CONFIG["MODEL"],
+                    "messages": messages,
+                    "temperature": 0
+                }),
                 timeout=CONFIG["REQUEST_TIMEOUT"]
             )
+            raw_response_text = response.text
             response.raise_for_status()
-            return response.json()['choices'][0]['message']
+            response_data = response.json()
+            usage = response_data.get("usage", {}) if isinstance(response_data, dict) else {}
+            input_tokens = usage.get("prompt_tokens")
+            if input_tokens is None:
+                input_tokens = usage.get("input_tokens")
+            output_tokens = usage.get("completion_tokens")
+            if output_tokens is None:
+                output_tokens = usage.get("output_tokens")
+            total_tokens = usage.get("total_tokens")
+            if total_tokens is None and isinstance(input_tokens, int) and isinstance(output_tokens, int):
+                total_tokens = input_tokens + output_tokens
+            choices = response_data.get("choices", [])
+            if not choices or "message" not in choices[0]:
+                raise ValueError(f"Unexpected API response schema: {raw_response_text[:200]}")
+
+            message_content = _content_to_text(choices[0]["message"].get("content"))
+            return {
+                "message_content": message_content,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+            }
         except Exception as e:
             logger.warning(f"API request failed (Attempt {attempt + 1}/{CONFIG['MAX_RETRIES']}): {e}")
             time.sleep(2 ** attempt)
     return None
 
 
+def _content_to_text(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, str):
+                text_parts.append(item)
+            elif isinstance(item, dict) and item.get("type") == "text":
+                text_parts.append(item.get("text", ""))
+        return "\n".join(part for part in text_parts if part)
+    return str(content) if content is not None else ""
+
+
+def _normalize_json_text(raw_text):
+    text = raw_text.strip()
+
+    # Handle fenced output like ```json ... ```
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+
+    json_match = re.search(r'\{[\s\S]*\}', text)
+    candidate = json_match.group(0) if json_match else text
+
+    # Some models output JSON-like booleans in uppercase.
+    candidate = re.sub(r'\bTRUE\b', 'true', candidate)
+    candidate = re.sub(r'\bFALSE\b', 'false', candidate)
+    candidate = re.sub(r'\bNULL\b', 'null', candidate)
+    candidate = re.sub(r'\bNone\b', 'null', candidate)
+    return candidate
+
+
 def parse_result(content):
-    if not content:
+    content_text = _content_to_text(content)
+    if not content_text:
         return _error_result("API returned empty or request failed after retries")
     try:
-        json_match = re.search(r'\{[\s\S]*\}', content)
-        content_to_parse = json_match.group(0) if json_match else content
-        data = json.loads(content_to_parse)
+        data = json.loads(_normalize_json_text(content_text))
         return {
             "valid": data.get("valid"),
             "action_valid": data.get("criteria", {}).get("action_valid"),
@@ -279,7 +354,7 @@ def parse_result(content):
             "reason": data.get("reason", "No reason provided")
         }
     except Exception as e:
-        return _error_result(f"Parse error: {e} | Content: {content[:150]}")
+        return _error_result(f"Parse error: {e} | Content: {content_text[:150]}")
 
 
 def _error_result(reason_str):
@@ -289,11 +364,51 @@ def _error_result(reason_str):
     }
 
 
+def validate_task_input(task):
+    from_img = task.get("from_img")
+    to_img = task.get("to_img")
+    action = task.get("action")
+
+    if not from_img or not to_img:
+        return "Input validation failed: both Screen 1 and Screen 2 paths are required."
+    if not os.path.exists(from_img) or not os.path.exists(to_img):
+        return "Input validation failed: Screen 1 or Screen 2 image file does not exist."
+    if not isinstance(action, str) or not action.strip() or action.strip() == ":":
+        return "Input validation failed: corresponding action is missing or empty."
+    return None
+
+
+def log_model_response_content(task, message_content, input_tokens=None, output_tokens=None, total_tokens=None):
+    logger.debug(
+        "Model response content | app=%s | from=%s | to=%s | action=%s | input_tokens=%s | output_tokens=%s | "
+        "total_tokens=%s\n%s",
+        task["app_name"],
+        os.path.basename(task["from_img"]),
+        os.path.basename(task["to_img"]),
+        task["action"],
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        message_content if message_content else "<empty-response>",
+    )
+
+
 def evaluate_transition(task):
-    img1_base64 = encode_image(task['from_img'])
+    validation_error = validate_task_input(task)
+    if validation_error:
+        return {**task_to_row(task), **_error_result(validation_error)}
+
+    img1_base64, bbox = encode_screen1_with_action_bbox(task['from_img'], task['action'])
     img2_base64 = encode_image(task['to_img'])
     if not img1_base64 or not img2_base64:
         return {**task_to_row(task), **_error_result("Image encoding failed")}
+    if bbox is not None:
+        logger.debug(
+            "Applied bbox overlay on Screen 1 | app=%s | from=%s | bbox=%s",
+            task.get("app_name", ""),
+            os.path.basename(task['from_img']),
+            bbox
+        )
     content = [
         {"type": "text",
          "text": "I will provide two images. IMAGE 1 is the state BEFORE the action. IMAGE 2 is the state AFTER the action."},
@@ -307,8 +422,12 @@ def evaluate_transition(task):
         {"type": "text", "text": CONFIG["PROMPT"]}
     ]
     messages = [{"role": "user", "content": content}]
-    res = call_model(messages)
-    final_content = res.get("content") if res and res.get("content") else ""
+    model_result = call_model(messages)
+    final_content = model_result.get("message_content", "") if model_result else ""
+    input_tokens = model_result.get("input_tokens") if model_result else None
+    output_tokens = model_result.get("output_tokens") if model_result else None
+    total_tokens = model_result.get("total_tokens") if model_result else None
+    log_model_response_content(task, final_content, input_tokens, output_tokens, total_tokens)
     parsed = parse_result(final_content)
     return {**task_to_row(task), **parsed}
 
@@ -324,204 +443,329 @@ def task_to_row(task):
 
 def load_processed_tasks(csv_path):
     if not os.path.exists(csv_path):
-        return set()
+        return set(), {}
 
     processed_ids = set()
+    valid_true_count_by_app = {}
     try:
         with open(csv_path, 'r', newline='', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # 确保关键列存在
-                if all(k in row for k in ['app_name', 'from_screen_filename', 'to_screen_filename', 'action']):
-                    task_id = (
-                        row['app_name'],
-                        row['from_screen_filename'],
-                        row['to_screen_filename'],
-                        row['action']
-                    )
-                    processed_ids.add(task_id)
+                if not all(k in row for k in ['app_name', 'from_screen_filename', 'to_screen_filename', 'action']):
+                    continue
+
+                valid_str = str(row.get('valid', '')).strip().lower()
+                is_successful = row.get('violations') != 'error' and valid_str in {'true', 'false'}
+                if not is_successful:
+                    continue
+
+                task_id = (
+                    row['app_name'],
+                    row['from_screen_filename'],
+                    row['to_screen_filename'],
+                    row['action']
+                )
+                processed_ids.add(task_id)
+
+                if valid_str == 'true':
+                    app_name = row['app_name']
+                    valid_true_count_by_app[app_name] = valid_true_count_by_app.get(app_name, 0) + 1
     except Exception as e:
         logger.error(f"Error reading existing CSV file at {csv_path}: {e}. Continuing without resuming.")
-        return set()
+        return set(), {}
 
     logger.info(f"Loaded {len(processed_ids)} previously processed tasks from {csv_path}. They will be skipped.")
-    return processed_ids
+    return processed_ids, valid_true_count_by_app
 
 
-def main():
-    #  初始化日志
+def main(max_workers=None):
     setup_logging()
 
-    processed_ids = load_processed_tasks(CONFIG["OUTPUT_CSV"])
+    if max_workers is None:
+        max_workers = CONFIG["MAX_WORKERS"]
+    if max_workers <= 0:
+        logger.warning(f"Ignoring invalid --max-workers={max_workers}. Using 1.")
+        max_workers = 1
 
-    logger.info(">>> Scanning directories and collecting new tasks...")
-    tasks = []
-    total_found = 0
+    processed_ids, valid_true_count_by_app = load_processed_tasks(CONFIG["OUTPUT_CSV"])
+    logger.info(">>> Scanning directories and evaluating sampled transitions...")
 
-    for app_name in os.listdir(CONFIG["ROOT_DIR"]):
-        app_path = os.path.join(CONFIG["ROOT_DIR"], app_name)
-        utg_path = os.path.join(app_path, "utg.js")
-        if not os.path.exists(utg_path):
-            continue
-
-        try:
-            utg = load_utg(utg_path)
-            state_map = build_state_map(utg.get("nodes", []))
-            for edge in utg.get("edges", []):
-                from_id, to_id, events = edge.get("from"), edge.get("to"), edge.get("events", [])
-                if not all([from_id, to_id, events]) or from_id not in state_map or to_id not in state_map:
-                    continue
-
-                from_img_path = os.path.join(app_path, state_map[from_id])
-                to_img_path = os.path.join(app_path, state_map[to_id])
-                if not (os.path.exists(from_img_path) and os.path.exists(to_img_path)):
-                    continue
-
-                for event in events:
-                    total_found += 1
-                    action_str = extract_action(event)
-                    from_img_filename = os.path.basename(from_img_path)
-                    to_img_filename = os.path.basename(to_img_path)
-
-                    task_id = (app_name, from_img_filename, to_img_filename, action_str)
-
-                    if task_id not in processed_ids:
-                        tasks.append({
-                            "app_name": app_name,
-                            "from_img": from_img_path,
-                            "to_img": to_img_path,
-                            "action": action_str
-                        })
-
-        except Exception as e:
-            logger.error(f"Failed to process {app_name}: {e}")
-
-    new_tasks_count = len(tasks)
-    if new_tasks_count == 0:
-        logger.warning(
-            f"Scan complete. Found {total_found} total possible tasks, but all have been processed. Exiting.")
-        return
-
-    logger.info(
-        f"Found {total_found} total possible tasks. After filtering, {new_tasks_count} new tasks will be processed.")
-
-    results_for_stats = []
-    csv_lock = threading.Lock()
     fieldnames = [
         "app_name", "from_screen_filename", "to_screen_filename", "action",
         "valid", "action_valid", "causal_correct", "idm_learnable",
         "violations", "reason"
     ]
-
-    # === 修改核心区域开始 ===
     output_csv_path = CONFIG["OUTPUT_CSV"]
-    # 检查文件是否不存在，或者文件存在但大小为0（空文件）
     need_header = not os.path.exists(output_csv_path) or os.path.getsize(output_csv_path) == 0
+
+    app_names = []
+    for app_name in os.listdir(CONFIG["ROOT_DIR"]):
+        app_path = os.path.join(CONFIG["ROOT_DIR"], app_name)
+        if os.path.exists(os.path.join(app_path, "utg.js")):
+            app_names.append(app_name)
+
+    def process_single_app(app_name):
+        app_path = os.path.join(CONFIG["ROOT_DIR"], app_name)
+        utg_path = os.path.join(app_path, "utg.js")
+
+        already_valid_true = valid_true_count_by_app.get(app_name, 0)
+        app_valid_quota = max(0, CONFIG["MAX_VALID_SAMPLES_PER_APP"] - already_valid_true)
+        if app_valid_quota <= 0:
+            return {
+                "app_name": app_name,
+                "rows": [],
+                "total_found": 0,
+                "skipped_filter": 0,
+                "candidates": 0,
+                "evaluated": 0,
+                "valid_added": 0,
+                "skipped_quota": True,
+                "error": None,
+            }
+
+        try:
+            utg = load_utg(utg_path)
+        except Exception as e:
+            return {
+                "app_name": app_name,
+                "rows": [],
+                "total_found": 0,
+                "skipped_filter": 0,
+                "candidates": 0,
+                "evaluated": 0,
+                "valid_added": 0,
+                "skipped_quota": False,
+                "error": str(e),
+            }
+
+        state_map = build_state_map(utg.get("nodes", []))
+        app_candidates = []
+        app_total_found = 0
+        app_skipped_filter = 0
+        scan_step = 0
+        seen_task_ids = set()
+
+        for edge in utg.get("edges", []):
+            from_id, to_id, events = edge.get("from"), edge.get("to"), edge.get("events", [])
+            if not all([from_id, to_id, events]) or from_id not in state_map or to_id not in state_map:
+                continue
+
+            from_img_path = os.path.join(app_path, state_map[from_id])
+            to_img_path = os.path.join(app_path, state_map[to_id])
+            if not (os.path.exists(from_img_path) and os.path.exists(to_img_path)):
+                continue
+
+            for event in events:
+                scan_step += 1
+                if not should_process_event(event):
+                    app_skipped_filter += 1
+                    continue
+
+                app_total_found += 1
+                action_str = extract_action(event)
+                from_img_filename = os.path.basename(from_img_path)
+                to_img_filename = os.path.basename(to_img_path)
+                task_id = (app_name, from_img_filename, to_img_filename, action_str)
+                if task_id in processed_ids or task_id in seen_task_ids:
+                    continue
+                seen_task_ids.add(task_id)
+
+                event_id = event.get("event_id")
+                try:
+                    trajectory_step = int(event_id)
+                except (TypeError, ValueError):
+                    trajectory_step = scan_step
+
+                app_candidates.append({
+                    "app_name": app_name,
+                    "from_img": from_img_path,
+                    "to_img": to_img_path,
+                    "action": action_str,
+                    "trajectory_step": trajectory_step,
+                    "scan_step": scan_step,
+                })
+
+        app_candidates.sort(key=lambda t: (t["trajectory_step"], t["scan_step"]))
+        for idx, task in enumerate(app_candidates):
+            task["trajectory_index"] = idx
+
+        if not app_candidates:
+            return {
+                "app_name": app_name,
+                "rows": [],
+                "total_found": app_total_found,
+                "skipped_filter": app_skipped_filter,
+                "candidates": 0,
+                "evaluated": 0,
+                "valid_added": 0,
+                "skipped_quota": False,
+                "error": None,
+            }
+
+        large_trajectory = len(app_candidates) >= CONFIG["LARGE_TRAJECTORY_THRESHOLD"]
+        min_step_margin = CONFIG["MIN_STEP_MARGIN"] if large_trajectory else 0
+
+        mid = len(app_candidates) // 2
+        sample_order_indices = [mid]
+        offset = 1
+        while len(sample_order_indices) < len(app_candidates):
+            left = mid - offset
+            right = mid + offset
+            if left >= 0:
+                sample_order_indices.append(left)
+            if right < len(app_candidates):
+                sample_order_indices.append(right)
+            offset += 1
+
+        rows = []
+        app_valid_added = 0
+        app_evaluated = 0
+        selected_positions = []
+
+        for idx in sample_order_indices:
+            if app_valid_added >= app_valid_quota:
+                break
+
+            task = app_candidates[idx]
+            if min_step_margin > 0 and any(
+                abs(task["trajectory_index"] - pos) < min_step_margin for pos in selected_positions
+            ):
+                continue
+
+            row_result = evaluate_transition(task)
+            rows.append(row_result)
+            app_evaluated += 1
+
+            if row_result.get("valid") is True:
+                app_valid_added += 1
+                selected_positions.append(task["trajectory_index"])
+
+        return {
+            "app_name": app_name,
+            "rows": rows,
+            "total_found": app_total_found,
+            "skipped_filter": app_skipped_filter,
+            "candidates": len(app_candidates),
+            "evaluated": app_evaluated,
+            "valid_added": app_valid_added,
+            "skipped_quota": False,
+            "error": None,
+            "large_trajectory": large_trajectory,
+            "min_step_margin": min_step_margin,
+            "quota": app_valid_quota,
+        }
+
+    total_found = 0
+    total_skipped_by_event_filter = 0
+    total_candidates = 0
+    total_evaluated = 0
+    stats_valid = 0
+    stats_invalid = 0
+    stats_error = 0
 
     with open(output_csv_path, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-
-        # 如果需要表头，则写入
         if need_header:
             writer.writeheader()
-            f.flush()  # 强制立即将表头写入磁盘，防止多线程写入时发生覆盖或错乱
-        # === 修改核心区域结束 ===
+            f.flush()
 
-        with ThreadPoolExecutor(max_workers=CONFIG["MAX_WORKERS"]) as executor:
-            futures = [executor.submit(evaluate_transition, task) for task in tasks]
-            pbar = tqdm(as_completed(futures), total=new_tasks_count, desc="Evaluating New Transitions", unit="task")
+        def consume_app_result(result):
+            nonlocal total_found, total_skipped_by_event_filter, total_candidates
+            nonlocal total_evaluated, stats_valid, stats_invalid, stats_error
 
-            for future in pbar:
-                try:
-                    row_result = future.result()
-                    results_for_stats.append(row_result)
-                    with csv_lock:
-                        writer.writerow(row_result)
-                    status = (
-                        " Valid" if row_result.get("valid")
-                        else " Invalid" if row_result.get("valid") is False
-                        else " Error"
-                    )
-                    pbar.set_postfix_str(status)
-                except Exception as e:
-                    logger.error(f"A task failed with an unexpected error: {e}")
+            app_name = result["app_name"]
+            if result.get("error"):
+                logger.error(f"Failed to process {app_name}: {result['error']}")
+                return
 
-    # 3. 最终统计
-    stats_valid = sum(1 for r in results_for_stats if r.get("valid"))
-    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is False)
-    stats_error = new_tasks_count - stats_valid - stats_invalid
-    # ================= 动作级别统计 =================
+            total_found += result["total_found"]
+            total_skipped_by_event_filter += result["skipped_filter"]
+            total_candidates += result["candidates"]
 
-    action_stats = {}
+            if result.get("skipped_quota"):
+                logger.info(
+                    f"[{app_name}] already has {valid_true_count_by_app.get(app_name, 0)} valid samples "
+                    f"(quota reached), skipping."
+                )
+                return
 
-    def get_action_type(action_str):
+            if result["candidates"] > 0:
+                logger.info(
+                    f"[{app_name}] candidates={result['candidates']}, quota={result.get('quota', 0)}, "
+                    f"large_trajectory={result.get('large_trajectory', False)}, "
+                    f"min_step_margin={result.get('min_step_margin', 0)}"
+                )
 
-        if not action_str:
-            return "unknown"
-        return action_str.split(":")[0].strip()
+            for row in result["rows"]:
+                writer.writerow(row)
+                valid_value = row.get("valid")
+                if valid_value is True:
+                    stats_valid += 1
+                elif valid_value is False:
+                    stats_invalid += 1
+                else:
+                    stats_error += 1
 
-    for r in results_for_stats:
-        action_type = get_action_type(r.get("action"))
+            total_evaluated += result["evaluated"]
+            logger.info(f"[{app_name}] evaluated={result['evaluated']}, new_valid_true={result['valid_added']}")
 
-        if action_type not in action_stats:
-            action_stats[action_type] = {
-                "total": 0,
-                "valid": 0,
-                "invalid": 0,
-                "error": 0
-            }
-
-        action_stats[action_type]["total"] += 1
-
-        if r.get("valid") is True:
-            action_stats[action_type]["valid"] += 1
-        elif r.get("valid") is False:
-            action_stats[action_type]["invalid"] += 1
+        if max_workers == 1:
+            for app_name in app_names:
+                result = process_single_app(app_name)
+                consume_app_result(result)
         else:
-            action_stats[action_type]["error"] += 1
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                app_iter = iter(app_names)
+                in_flight = {}
+                max_in_flight = max_workers * 4
 
-    # --- 日志输出部分 ---
-    logger.info("\n" + "=" * 20 + " Action Stats " + "=" * 20)
+                for _ in range(max_in_flight):
+                    app_name = next(app_iter, None)
+                    if app_name is None:
+                        break
+                    future = executor.submit(process_single_app, app_name)
+                    in_flight[future] = app_name
 
-    action_list = [
-        "touch", "intent", "scroll", "long_touch",
-        "set_text", "kill_app", "select",
-        "unselect", "wait_user_login"
-    ]
+                while in_flight:
+                    finished = next(as_completed(in_flight))
+                    in_flight.pop(finished)
+                    try:
+                        result = finished.result()
+                    except Exception as e:
+                        logger.error(f"A folder task failed with unexpected error: {e}")
+                        continue
 
-    for action_type in action_list:
-        stats = action_stats.get(action_type, {
-            "total": 0, "valid": 0, "invalid": 0, "error": 0
-        })
+                    consume_app_result(result)
 
-        total = stats["total"]
-        valid = stats["valid"]
-        invalid = stats["invalid"]
-        error = stats["error"]
+                    next_app = next(app_iter, None)
+                    if next_app is not None:
+                        future = executor.submit(process_single_app, next_app)
+                        in_flight[future] = next_app
 
-        logger.info(
-            f"[{action_type}] "
-            f"Total: {total} | "
-            f"Valid: {valid} ({(valid / total if total else 0):.2%}) | "
-            f"Invalid: {invalid} ({(invalid / total if total else 0):.2%}) | "
-            f"Error: {error} ({(error / total if total else 0):.2%})"
-        )
-
-    logger.info("=" * 58)
+    if total_evaluated == 0:
+        logger.warning("No new tasks were evaluated in this run.")
+        return
 
     logger.info("\n" + "=" * 20 + " This Run's Stats " + "=" * 20)
-    logger.info(f"  Tasks Processed in this run: {new_tasks_count}")
-    logger.info(
-        f"  Valid Transitions:   {stats_valid} ({(stats_valid / new_tasks_count if new_tasks_count > 0 else 0):.2%})")
-    logger.info(
-        f"  Invalid Transitions: {stats_invalid} ({(stats_invalid / new_tasks_count if new_tasks_count > 0 else 0):.2%})")
-    logger.info(
-        f"   Processing Errors:   {stats_error} ({(stats_error / new_tasks_count if new_tasks_count > 0 else 0):.2%})")
+    logger.info(f"  Total eligible events found: {total_found}")
+    logger.info(f"  Skipped by event filters:   {total_skipped_by_event_filter}")
+    logger.info(f"  New candidates considered:  {total_candidates}")
+    logger.info(f"  API calls in this run:      {total_evaluated}")
+    logger.info(f"  Valid Transitions:          {stats_valid} ({(stats_valid / total_evaluated):.2%})")
+    logger.info(f"  Invalid Transitions:        {stats_invalid} ({(stats_invalid / total_evaluated):.2%})")
+    logger.info(f"  Processing Errors:          {stats_error} ({(stats_error / total_evaluated):.2%})")
     logger.info("=" * 58)
-
     logger.info(f"Results have been appended to {CONFIG['OUTPUT_CSV']}")
     logger.info(f"Full execution log saved to {CONFIG['LOG_FILE']}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Filter mobile GUI transitions for IDM.")
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=CONFIG["MAX_WORKERS"],
+        help="Max number of folder-processing threads."
+    )
+    args = parser.parse_args()
+    main(max_workers=args.max_workers)
