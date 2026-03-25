@@ -450,8 +450,67 @@ def main():
     stats_valid = sum(1 for r in results_for_stats if r.get("valid"))
     stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is FALSE)
     stats_error = new_tasks_count - stats_valid - stats_invalid
+# ================= 动作级别统计 =================
 
+    action_stats = {}
+
+    def get_action_type(action_str):
+        # action 格式是 "touch: xxx"
+        if not action_str:
+            return "unknown"
+        return action_str.split(":")[0].strip()
+
+    for r in results_for_stats:
+        action_type = get_action_type(r.get("action"))
+
+        if action_type not in action_stats:
+            action_stats[action_type] = {
+                "total": 0,
+                "valid": 0,
+                "invalid": 0,
+                "error": 0
+            }
+
+        action_stats[action_type]["total"] += 1
+
+        if r.get("valid") is True:
+            action_stats[action_type]["valid"] += 1
+        elif r.get("valid") is False:
+            action_stats[action_type]["invalid"] += 1
+        else:
+            action_stats[action_type]["error"] += 1
+
+    
     # --- 日志输出部分 ---
+ logger.info("\n" + "=" * 20 + " Action Stats " + "=" * 20)
+
+    action_list = [
+        "touch", "intent", "scroll", "long_touch",
+        "set_text", "kill_app", "select",
+        "unselect", "wait_user_login"
+    ]
+
+    for action_type in action_list:
+        stats = action_stats.get(action_type, {
+            "total": 0, "valid": 0, "invalid": 0, "error": 0
+        })
+
+        total = stats["total"]
+        valid = stats["valid"]
+        invalid = stats["invalid"]
+        error = stats["error"]
+
+        logger.info(
+            f"[{action_type}] "
+            f"Total: {total} | "
+            f"Valid: {valid} ({(valid / total if total else 0):.2%}) | "
+            f"Invalid: {invalid} ({(invalid / total if total else 0):.2%}) | "
+            f"Error: {error} ({(error / total if total else 0):.2%})"
+        )
+
+    logger.info("=" * 58)
+
+    
     logger.info("\n" + "=" * 20 + " This Run's Stats " + "=" * 20)
     logger.info(f"  Tasks Processed in this run: {new_tasks_count}")
     logger.info(
