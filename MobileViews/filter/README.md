@@ -79,11 +79,19 @@ Edit `CONFIG` in `filter_trace.py`:
 - `MIN_STEP_MARGIN`: minimum sampled step distance for long trajectories.
 - `REQUEST_TIMEOUT`, `MAX_RETRIES`. -->
 
-API key is read from environment variable:
+API key is read from environment variable (if using commercial LLM services):
 
 ```bash
 export API_KEY="your_api_key"
 ```
+
+[Use vllm to deploy `Qwen3.5-397B-A17B`](https://huggingface.co/Qwen/Qwen3.5-397B-A17B)
+
+```
+vllm serve Qwen/Qwen3.5-397B-A17B --port 8000 --tensor-parallel-size 8 --max-model-len 40960 --reasoning-parser qwen3 --host=xx.xx.xx.xx
+```
+
+Then fix the `API_URL` and `MODEL` field in `CONFIG`
 
 ## How To Run The Filter
 
