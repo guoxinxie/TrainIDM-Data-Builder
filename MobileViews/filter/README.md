@@ -8,7 +8,7 @@ Core mapping:
 
 ## What This Repo Contains
 
-- `filter_mv.py`: main filtering script (VLM-based).
+- `filter_trace.py`: main filtering script (VLM-based).
 - `generate_transition_preview.py`: generate HTML preview from CSV results.
 - `generate_transition_preview.sh`: one-command wrapper to generate preview HTML.
 
@@ -24,7 +24,7 @@ pip install requests pillow
 
 ## Dataset Structure
 
-`filter_mv.py` expects a root directory like this:
+`filter_trace.py` expects a root directory like this:
 
 ```text
 mv_trace_en/
@@ -64,9 +64,9 @@ Model response handling:
 - Logs model `message.content` and token usage (`input/output/total`) to log file.
 - Robust JSON parsing with normalization for `TRUE/FALSE/NULL/None` variants.
 
-## Configuration
+## Important Configurations
 
-Edit `CONFIG` in `filter_mv.py`:
+Edit `CONFIG` in `filter_trace.py`:
 
 - `ROOT_DIR`: dataset root.
 - `OUTPUT_CSV`: output CSV path.
@@ -75,9 +75,9 @@ Edit `CONFIG` in `filter_mv.py`:
 - `MODEL`: model id.
 - `MAX_WORKERS`: default parallel folder workers.
 - `MAX_VALID_SAMPLES_PER_APP`: per-app valid quota.
-- `LARGE_TRAJECTORY_THRESHOLD`: threshold to enable step-margin rule.
+<!-- - `LARGE_TRAJECTORY_THRESHOLD`: threshold to enable step-margin rule.
 - `MIN_STEP_MARGIN`: minimum sampled step distance for long trajectories.
-- `REQUEST_TIMEOUT`, `MAX_RETRIES`.
+- `REQUEST_TIMEOUT`, `MAX_RETRIES`. -->
 
 API key is read from environment variable:
 
@@ -90,13 +90,13 @@ export API_KEY="your_api_key"
 Default workers (from config):
 
 ```bash
-python3 filter_mv.py
+python3 filter_trace.py
 ```
 
 Override worker count:
 
 ```bash
-python3 filter_mv.py --max-workers 8
+python3 filter_trace.py --max-workers 8
 ```
 
 ## Output Files
