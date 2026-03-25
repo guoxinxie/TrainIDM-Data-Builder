@@ -150,7 +150,7 @@ If the mapping is highly unusual or contradicts standard UI behavior, mark INVAL
 DECISION LOGIC
 
 - If NO rules are triggered:
-  valid = TRUE
+  valid = true
   violations = []
 
 - If ANY rule is triggered:
@@ -167,7 +167,7 @@ The criteria fields MUST align with violations:
 - If Rule 3, 4, or 5 triggered → causal_correct = FALSE
 - If Rule 6, 7, or 8 triggered → idm_learnable = FALSE
 
-If no rule is triggered → all criteria must be TRUE
+If no rule is triggered → all criteria must be true
 
 --------------------------------------------------
 
@@ -177,11 +177,11 @@ You MUST return a valid JSON object ONLY.
 Do NOT include markdown, explanations, or extra text.
 
 {
-  "valid": TRUE or FALSE,
+  "valid": true or FALSE,
   "criteria": {
-    "action_valid": TRUE or FALSE,
-    "causal_correct": TRUE or FALSE,
-    "idm_learnable": TRUE or FALSE
+    "action_valid": true or FALSE,
+    "causal_correct": true or FALSE,
+    "idm_learnable": true or FALSE
   },
   "violations": [],
   "reason": "A concise 1-3 sentence explanation referencing visible UI evidence"
@@ -473,7 +473,7 @@ def main():
 
         action_stats[action_type]["total"] += 1
 
-        if r.get("valid") is True:
+        if r.get("valid") is true:
             action_stats[action_type]["valid"] += 1
         elif r.get("valid") is False:
             action_stats[action_type]["invalid"] += 1
