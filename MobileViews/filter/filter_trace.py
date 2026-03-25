@@ -439,7 +439,7 @@ def main():
                         writer.writerow(row_result)
                     status = (
                         " Valid" if row_result.get("valid")
-                        else " Invalid" if row_result.get("valid") is false
+                        else " Invalid" if row_result.get("valid") is False
                         else " Error"
                     )
                     pbar.set_postfix_str(status)
@@ -448,7 +448,7 @@ def main():
 
     # 3. 最终统计
     stats_valid = sum(1 for r in results_for_stats if r.get("valid"))
-    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is false)
+    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is False)
     stats_error = new_tasks_count - stats_valid - stats_invalid
     # ================= 动作级别统计 =================
 
@@ -473,9 +473,9 @@ def main():
 
         action_stats[action_type]["total"] += 1
 
-        if r.get("valid") is true:
+        if r.get("valid") is True:
             action_stats[action_type]["valid"] += 1
-        elif r.get("valid") is false:
+        elif r.get("valid") is False:
             action_stats[action_type]["invalid"] += 1
         else:
             action_stats[action_type]["error"] += 1
