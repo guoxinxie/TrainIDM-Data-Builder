@@ -439,7 +439,7 @@ def main():
                         writer.writerow(row_result)
                     status = (
                         " Valid" if row_result.get("valid")
-                        else " Invalid" if row_result.get("valid") is FALSE
+                        else " Invalid" if row_result.get("valid") is False
                         else " Error"
                     )
                     pbar.set_postfix_str(status)
@@ -448,14 +448,14 @@ def main():
 
     # 3. 最终统计
     stats_valid = sum(1 for r in results_for_stats if r.get("valid"))
-    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is FALSE)
+    stats_invalid = sum(1 for r in results_for_stats if r.get("valid") is False)
     stats_error = new_tasks_count - stats_valid - stats_invalid
-# ================= 动作级别统计 =================
+    # ================= 动作级别统计 =================
 
     action_stats = {}
 
     def get_action_type(action_str):
-        # action 格式是 "touch: xxx"
+
         if not action_str:
             return "unknown"
         return action_str.split(":")[0].strip()
@@ -480,9 +480,8 @@ def main():
         else:
             action_stats[action_type]["error"] += 1
 
-    
     # --- 日志输出部分 ---
- logger.info("\n" + "=" * 20 + " Action Stats " + "=" * 20)
+    logger.info("\n" + "=" * 20 + " Action Stats " + "=" * 20)
 
     action_list = [
         "touch", "intent", "scroll", "long_touch",
@@ -510,7 +509,6 @@ def main():
 
     logger.info("=" * 58)
 
-    
     logger.info("\n" + "=" * 20 + " This Run's Stats " + "=" * 20)
     logger.info(f"  Tasks Processed in this run: {new_tasks_count}")
     logger.info(
