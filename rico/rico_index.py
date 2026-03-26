@@ -1,21 +1,20 @@
-import os
 import json
+import os
 
 # ================= 配置 =================
 
-rico_action_json = "/data/rico_actions_processed.json"
+rico_action_json = "./rico_actions_processed.json"
 
-trace_root = "/data/filtered_traces"
+trace_root = "./filtered_traces"
 
-output_json = "/data/rico_qwenvl.json"
+output_json = "./rico_qwenvl.json"
 
-image_prefix = "/data/filtered_traces"
+image_prefix = "./filtered_traces"
 
 human_prompt = (
     "<image>\n"
     "<image>\n"
-    "Observe the two screenshots before and after. "
-    "Output the action JSON that caused this state change."
+    "<prompt_placeholder>"
 )
 
 # ========================================

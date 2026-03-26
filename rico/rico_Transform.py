@@ -1,15 +1,16 @@
-import os
-import json
 import csv
+import json
+import os
+
 from PIL import Image
 
 # ===================== 配置 =====================
 
-rico_root = "/data/filtered_traces"
+rico_root = "./filtered_traces"
 
-output_json = "/data/rico_actions_processed.json"
+output_json = "./rico_actions_processed.json"
 
-csv_path = "/data/gui_transition_result.csv"
+csv_path = "./gui_transition_result.csv"
 
 
 # ===================== 读取CSV过滤规则 =====================
