@@ -3,6 +3,27 @@
 
 脚本可提取“操作前截图”和“操作后截图”，并构造问答对，要求模型根据两张图的差异输出导致状态变化的动作（Action JSON）。
 
+## TL;DR
+
+1. 准备并解压 RICO `filtered_traces` 数据到本地目录。
+2. **直接使用仓库里已提供的 `gui_transition_result.csv`**（优先推荐），不要先跑 `filter/` 里的 Python 脚本重生 CSV。
+3. 在 `rico_Transform.py` 里只改 3 个路径：
+   - `rico_root` -> 你的 `filtered_traces` 路径
+   - `csv_path` -> 指向现成的 `gui_transition_result.csv`
+   - `output_json` -> 你的输出路径（如 `rico_actions_processed.json`）
+4. 运行：`python rico_Transform.py`
+   - 该阶段输出：`rico_actions_processed.json`
+   - 内容说明：每条样本包含 `trace_id`、`image_before`、`image_after` 和结构化 `action`（如 `click/scroll/long_press/navigate_back`），即 `(状态前, 动作, 状态后)` 数据。
+5. 在 `rico_index.py` 里配置：
+   - `rico_action_json` -> 上一步输出 JSON
+   - `trace_root` / `image_prefix` -> 你的 `filtered_traces` 路径
+   - `output_json` -> 最终训练数据路径
+6. 运行：`python rico_index.py`
+   - 该阶段输出：最终多模态训练集 JSON（例如 `rico_qwenvl.json`）
+   - 内容说明：每条样本包含两张图路径（before/after）和 `conversations` 字段，其中 `human` 是双图 Prompt，`gpt` 是目标动作 JSON 字符串。
+
+说明：`filter/` 目录下的脚本用于“重新筛选/重生成 CSV”。只有当你需要自定义筛选策略时才使用；默认直接使用现成 CSV 即可。
+
 ### 一、下载RICO的Interaction Traces数据集并解压至filtered_traces层
 
 ### 二、下载已经筛选好的gui_transition_result.csv（或者通过同目录下的filter工具微调后筛选）
@@ -252,6 +273,4 @@ python rico_index.py
 ### 2. Qwen-VL (通义千问-视觉大模型)
 本脚本输出的 `json` 格式专门为 **Qwen-VL**（或其他采用类似 LLaVA/ShareGPT 对话格式的多模态模型）的监督微调（SFT）设计。感谢阿里云团队开源了优秀的视觉语言大模型。
 * **链接**: [https://github.com/QwenLM/Qwen3-VL](https://github.com/QwenLM/Qwen3-VL)
-
-
 
