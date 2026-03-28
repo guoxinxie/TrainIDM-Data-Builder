@@ -24,9 +24,10 @@ CONFIG = {
     "MODEL": "qwen/qwen3.5-397b-a17b",  # 调用的具体视觉模型名称。必须与提供商（或本地部署）的模型列表名称严格一致
 
     # ================= 性能与网络配置区 =================
-    "MAX_WORKERS": 5,  # 并发处理的 APP 文件夹线程数。
+    "MAX_WORKERS": 5,  # 并发处理的 APP 文件夹线程/app数。
     "MAX_VALID_SAMPLES_PER_APP": 5,  # 每个 APP 最多保留多少条 valid=True 的样本。
-    "LARGE_TRAJECTORY_THRESHOLD": 12,  # 当候选步数达到该阈值时，启用最小步距约束。
+    # [No need to modify the following params]
+    "LARGE_TRAJECTORY_THRESHOLD": 12,  # 选步数达到该阈值时，启用最小步距约束。
     "MIN_STEP_MARGIN": 2,  # 大轨迹下，已选样本之间的最小步距（按轨迹顺序索引计算）。
     "REQUEST_TIMEOUT": 120,  #  注意：视觉大模型（VLM）处理两张高分辨率图片速度较慢，建议保持 60 秒或以上。
     "MAX_RETRIES": 3,  # 单个任务失败（如网络抖动、API 暂时限流）时的最大重试次数。配合代码里的指数退避算法（等待 1, 2, 4 秒后重试）提升稳定性。
@@ -621,24 +622,63 @@ def main(max_workers=None):
         app_valid_added = 0
         app_evaluated = 0
         selected_positions = []
+        per_app_in_flight = max(1, min(CONFIG["MAX_VALID_SAMPLES_PER_APP"], app_valid_quota))
+        next_order_pos = 0
 
-        for idx in sample_order_indices:
+        while next_order_pos < len(sample_order_indices):
             if app_valid_added >= app_valid_quota:
                 break
 
-            task = app_candidates[idx]
-            if min_step_margin > 0 and any(
-                abs(task["trajectory_index"] - pos) < min_step_margin for pos in selected_positions
-            ):
+            batch_items = []
+            while next_order_pos < len(sample_order_indices) and len(batch_items) < per_app_in_flight:
+                idx = sample_order_indices[next_order_pos]
+                next_order_pos += 1
+                task = app_candidates[idx]
+                if min_step_margin > 0 and any(
+                    abs(task["trajectory_index"] - pos) < min_step_margin for pos in selected_positions
+                ):
+                    continue
+                batch_items.append((idx, task))
+
+            if not batch_items:
                 continue
 
-            row_result = evaluate_transition(task)
-            rows.append(row_result)
-            app_evaluated += 1
+            if len(batch_items) == 1:
+                idx, task = batch_items[0]
+                evaluated_batch = [(idx, task, evaluate_transition(task))]
+            else:
+                with ThreadPoolExecutor(max_workers=len(batch_items)) as app_executor:
+                    future_to_meta = {
+                        app_executor.submit(evaluate_transition, task): (idx, task)
+                        for idx, task in batch_items
+                    }
+                    done_results = {}
+                    for future in as_completed(future_to_meta):
+                        idx, task = future_to_meta[future]
+                        try:
+                            row_result = future.result()
+                        except Exception as e:
+                            row_result = {**task_to_row(task), **_error_result(f"Unexpected app-batch error: {e}")}
+                        done_results[idx] = (task, row_result)
 
-            if row_result.get("valid") is True:
-                app_valid_added += 1
-                selected_positions.append(task["trajectory_index"])
+                evaluated_batch = []
+                for idx, _ in batch_items:
+                    task, row_result = done_results[idx]
+                    evaluated_batch.append((idx, task, row_result))
+
+            for _, task, row_result in evaluated_batch:
+                rows.append(row_result)
+                app_evaluated += 1
+
+                if row_result.get("valid") is True:
+                    if min_step_margin > 0 and any(
+                        abs(task["trajectory_index"] - pos) < min_step_margin for pos in selected_positions
+                    ):
+                        continue
+                    app_valid_added += 1
+                    selected_positions.append(task["trajectory_index"])
+                    if app_valid_added >= app_valid_quota:
+                        break
 
         return {
             "app_name": app_name,
