@@ -15,7 +15,7 @@ def parse_args():
     parser.add_argument("--root-dir", default="mv_trace_en", help="Dataset root directory.")
     parser.add_argument(
         "--output",
-        default="filter_mv_trace_preview.html",
+        default="filter_mv_filtered_preview.html",
         help="Output HTML path."
     )
     return parser.parse_args()

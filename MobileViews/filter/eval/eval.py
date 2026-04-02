@@ -1,3 +1,4 @@
+import argparse
 import csv
 import importlib.util
 import json
@@ -6,17 +7,52 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
-from agent import AGENT_REGISTRY
+EVAL_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = EVAL_DIR.parent
 
-CSV_PATH = "filter_mv_trace.csv"
-TRACE_DIR = "mv_trace_en"
+
+def _resolve_test_metadata_csv() -> Path:
+    candidates = [
+        PROJECT_ROOT / "test_subset" / "split_test.csv",
+        PROJECT_ROOT / "test_subset" / "split_test",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
+CSV_PATH = _resolve_test_metadata_csv()
+TRACE_DIR = PROJECT_ROOT / "test_subset" / "mv_trace_en"
 AGENT_NAME = "remote_vlm"
-COMPARISON_CSV_PATH = "eval_comparison_outputs.csv"
+OUTPUT_DIR = EVAL_DIR / "outputs"
+COMPARISON_CSV_PATH = OUTPUT_DIR / "eval_comparison_outputs.csv"
+# Set to an integer (e.g. 1000) to cap test samples, or None for all samples.
+MAX_TEST_SAMPLES = None
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate agent on extracted test subset.")
+    parser.add_argument(
+        "-n",
+        "--max-test-samples",
+        type=int,
+        default=None,
+        help="Maximum number of valid test samples to evaluate. Default: use MAX_TEST_SAMPLES in script.",
+    )
+    return parser.parse_args()
 
 
 def _load_navigate_back_alt_list() -> List[str]:
-    list_file = Path(__file__).with_name("navigate_back_alt_list.py")
-    if not list_file.exists():
+    candidates = [
+        EVAL_DIR / "navigate_back_alt_list.py",
+    ]
+    list_file = None
+    for path in candidates:
+        if path.exists():
+            list_file = path
+            break
+    if list_file is None:
         return []
 
     try:
@@ -285,12 +321,12 @@ def evaluate_action_type_match(generated_action: str, ground_truth_action: str) 
     return False
 
 
-def _resolve_state_path(trace_dir: str, app_name: str, filename: str) -> str:
-    return os.path.join(trace_dir, app_name, "states", filename)
+def _resolve_state_path(trace_dir, app_name: str, filename: str) -> str:
+    return str(Path(trace_dir) / app_name / "states" / filename)
 
 
-def extract_valid_true_samples(csv_path: str, trace_dir: str = TRACE_DIR) -> List[Dict[str, Any]]:
-    """Read filter_mv_trace.csv and keep rows with valid=TRUE."""
+def extract_valid_true_samples(csv_path, trace_dir=TRACE_DIR, max_samples=MAX_TEST_SAMPLES) -> List[Dict[str, Any]]:
+    """Read split_test CSV and keep rows with valid=TRUE."""
     samples: List[Dict[str, Any]] = []
 
     with open(csv_path, "r", newline="", encoding="utf-8") as f:
@@ -315,11 +351,21 @@ def extract_valid_true_samples(csv_path: str, trace_dir: str = TRACE_DIR) -> Lis
                 }
             )
 
+            if isinstance(max_samples, int) and max_samples > 0 and len(samples) >= max_samples:
+                break
+
     return samples
+
+
+def _load_agent_registry():
+    from agent import AGENT_REGISTRY
+
+    return AGENT_REGISTRY
 
 
 def run_agents_on_samples(samples: List[Dict[str, Any]], agent_name: str = AGENT_NAME) -> List[Dict[str, Any]]:
     """Feed each sample to one selected agent in agent.py and collect raw outputs."""
+    AGENT_REGISTRY = _load_agent_registry()
     if agent_name not in AGENT_REGISTRY:
         raise ValueError(f"Unknown agent: {agent_name}. Available: {list(AGENT_REGISTRY.keys())}")
 
@@ -391,7 +437,8 @@ def prepare_comparison_fields(agent_outputs: List[Dict[str, Any]]) -> List[Dict[
     return rows
 
 
-def dump_comparison_fields_to_csv(rows: List[Dict[str, Any]], csv_path: str = COMPARISON_CSV_PATH) -> None:
+def dump_comparison_fields_to_csv(rows: List[Dict[str, Any]], csv_path=COMPARISON_CSV_PATH) -> None:
+    Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=COMPARISON_FIELDNAMES)
         writer.writeheader()
@@ -399,7 +446,7 @@ def dump_comparison_fields_to_csv(rows: List[Dict[str, Any]], csv_path: str = CO
             writer.writerow({key: row.get(key) for key in COMPARISON_FIELDNAMES})
 
 
-def load_comparison_fields_from_csv(csv_path: str) -> List[Dict[str, Any]]:
+def load_comparison_fields_from_csv(csv_path) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     with open(csv_path, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -409,22 +456,35 @@ def load_comparison_fields_from_csv(csv_path: str) -> List[Dict[str, Any]]:
 
 
 if __name__ == "__main__":
-    if os.path.exists(COMPARISON_CSV_PATH):
+    args = parse_args()
+    if args.max_test_samples is not None and args.max_test_samples <= 0:
+        raise ValueError("--max-test-samples must be a positive integer.")
+
+    effective_max_test_samples = (
+        args.max_test_samples if args.max_test_samples is not None else MAX_TEST_SAMPLES
+    )
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    # If max-test-samples is set via CLI, force a fresh run so the cap takes effect.
+    if COMPARISON_CSV_PATH.exists() and args.max_test_samples is None:
         cached_rows = load_comparison_fields_from_csv(COMPARISON_CSV_PATH)
         rows = prepare_comparison_fields(cached_rows)
         dump_comparison_fields_to_csv(rows, COMPARISON_CSV_PATH)
 
         print(f"Found existing comparison CSV: {COMPARISON_CSV_PATH}")
         print("Skipped model inference. Re-evaluated using cached predictions.")
+        print(f"Max test samples: {effective_max_test_samples}")
         print(f"Prepared comparison rows: {len(rows)}")
         print(f"Saved comparison CSV: {COMPARISON_CSV_PATH}")
     else:
-        samples = extract_valid_true_samples(CSV_PATH, TRACE_DIR)
+        samples = extract_valid_true_samples(CSV_PATH, TRACE_DIR, effective_max_test_samples)
         outputs = run_agents_on_samples(samples, AGENT_NAME)
         rows = prepare_comparison_fields(outputs)
         dump_comparison_fields_to_csv(rows, COMPARISON_CSV_PATH)
 
         print(f"Loaded valid samples: {len(samples)}")
+        print(f"Max test samples: {effective_max_test_samples}")
         print(f"Agent outputs: {len(outputs)}")
         print(f"Prepared comparison rows: {len(rows)}")
         print(f"Saved comparison CSV: {COMPARISON_CSV_PATH}")

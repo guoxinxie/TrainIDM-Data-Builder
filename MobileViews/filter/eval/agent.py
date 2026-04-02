@@ -1,10 +1,12 @@
 import base64
 import json
 import os
+import re
 import time
 from typing import Any
 
 import requests
+from PIL import Image
 
 AGENT_CONFIG = {
     "api_key": os.getenv("API_KEY", ""),
@@ -51,6 +53,81 @@ def _content_to_text(content: Any) -> str:
                 text_parts.append(item.get("text", ""))
         return "\n".join(x for x in text_parts if x)
     return "" if content is None else str(content)
+
+
+def _parse_action_json(action_text: str):
+    text = (action_text or "").strip()
+    if not text:
+        return None
+
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # Fallback: extract the first JSON object from model output.
+    match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
+
+
+def _is_qwen3_vl_model(model_name: str) -> bool:
+    name = (model_name or "").lower()
+    return "qwen3-vl" in name
+
+
+def _is_qwen25_vl_model(model_name: str) -> bool:
+    name = (model_name or "").lower()
+    return "qwen2.5-vl" in name or "qwen25-vl" in name
+
+
+def _convert_qwen3_vl_xy_to_pixels(action_obj: dict, before_state_path: str):
+    action_type = action_obj.get("action_type")
+    if action_type not in {"click", "long_press"}:
+        return action_obj
+    if "x" not in action_obj or "y" not in action_obj:
+        return action_obj
+
+    try:
+        x_norm = float(action_obj["x"])
+        y_norm = float(action_obj["y"])
+    except Exception:
+        return action_obj
+
+    with Image.open(before_state_path) as img:
+        width, height = img.size
+
+    # Qwen3-VL grounding coordinates are normalized in [0, 1000].
+    x_pixel = int(round((x_norm / 1000.0) * width))
+    y_pixel = int(round((y_norm / 1000.0) * height))
+    x_pixel = max(0, min(x_pixel, max(width - 1, 0)))
+    y_pixel = max(0, min(y_pixel, max(height - 1, 0)))
+
+    action_obj["x"] = x_pixel
+    action_obj["y"] = y_pixel
+    return action_obj
+
+
+def _postprocess_action_by_model(action_text: str, before_state_path: str):
+    action_obj = _parse_action_json(action_text)
+    if not isinstance(action_obj, dict):
+        return action_text
+
+    model_name = AGENT_CONFIG.get("model", "")
+
+    if _is_qwen3_vl_model(model_name):
+        action_obj = _convert_qwen3_vl_xy_to_pixels(action_obj, before_state_path)
+    elif _is_qwen25_vl_model(model_name):
+        # TODO: Qwen2.5-VL placeholder.
+        # Keep current output unchanged for now.
+        action_obj = action_obj
+
+    return json.dumps(action_obj, ensure_ascii=False)
 
 
 def _call_remote_model(messages: list):
@@ -110,10 +187,11 @@ def infer_action_from_state_paths(before_state_path: str, after_state_path: str)
         return model_result
 
     message_content = model_result.get("message_content", "")
+    postprocessed_action = _postprocess_action_by_model(message_content, before_state_path)
 
     return {
         "ok": True,
-        "action": message_content,
+        "action": postprocessed_action,
         "raw_output": message_content,
     }
 

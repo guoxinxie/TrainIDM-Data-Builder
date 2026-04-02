@@ -1,20 +1,49 @@
-# MobileViews IDM Filter + Visualization
+# MobileViews IDM Pipeline
 
-This project filters MobileViews GUI transition pairs for Inverse Dynamics Model (IDM) training/evaluation, and provides an HTML viewer for quick inspection.
+This repo has three core jobs:
 
-Core mapping:
+1. Filter raw MobileViews transitions into valid/invalid metadata.
+2. Build train/test splits and extract a compact test subset.
+3. Generate training samples and run evaluation.
 
-`(Screen 1, Screen 2) -> Action`
+## Start Here (By Goal)
 
-## What This Repo Contains
+### If you want to filter valid/invalid traces
+Use:
+- `filter_trace.py`
+- `generate_filtered_preview.py`
+- `generate_filtered_preview.sh`
 
-- `filter_trace.py`: main filtering script (VLM-based).
-- `generate_transition_preview.py`: generate HTML preview from CSV results.
-- `generate_transition_preview.sh`: one-command wrapper to generate preview HTML.
+### If you want to build train/test split metadata
+Use:
+- `generate_split.py`
+- `extract_test_subset.py`
 
-## Requirements
+### If you want to generate training samples
+See:
+- [`train/README.md`](/Users/zli/Documents/mobile-agent/mobileviews/code/TrainIDM-Data-Builder/MobileViews/filter/train/README.md)
 
-Use Python 3.9+.
+### If you want to run evaluation
+See:
+- [`eval/README.md`](/Users/zli/Documents/mobile-agent/mobileviews/code/TrainIDM-Data-Builder/MobileViews/filter/eval/README.md)
+
+## Minimal Structure
+
+```text
+.
+├── mv_trace_en/                 # Raw MobileViews traces
+├── filtered_metadata/           # Filtered CSV parts + split outputs
+├── test_subset/                 # Extracted subset for evaluation
+├── train/                       # Training sample generation
+├── eval/                        # Evaluation scripts and outputs
+├── filter_trace.py
+├── generate_filtered_preview.py
+├── generate_filtered_preview.sh
+├── generate_split.py
+└── extract_test_subset.py
+```
+
+## Quick Commands
 
 Install dependencies:
 
@@ -22,150 +51,26 @@ Install dependencies:
 pip install requests pillow
 ```
 
-## Dataset Structure
-
-`filter_trace.py` expects a root directory like this:
-
-```text
-mv_trace_en/
-  <app_folder_1>/
-    utg.js
-    states/
-      screen_xxx.jpg
-  <app_folder_2>/
-    utg.js
-    states/
-      screen_xxx.jpg
-```
-
-`utg.js` must contain `nodes`/`edges` with state-image mapping and events.
-
-## Filtering Logic (Current)
-
-The script processes app folders independently (folder-by-folder), and app folders run in parallel via thread pool.
-
-For each app:
-
-- Load all candidate transitions from `utg.js`.
-- Skip event types: `intent`, `kill_app`, `wait_user_login`.
-- Skip already processed successful rows in existing CSV (resume behavior).
-- Sort candidates by trajectory step (`event_id` fallback to scan order).
-- Sampling order: midpoint first, then expand to both sides.
-- For long trajectories (`LARGE_TRAJECTORY_THRESHOLD`), enforce min step distance (`MIN_STEP_MARGIN`) between selected valid samples.
-- Evaluate until app gets up to `MAX_VALID_SAMPLES_PER_APP` new `valid=True` samples.
-
-Before sending to model:
-
-- If action contains `bound_box=...` / `bounding_box=...` / `bbox=...`, Screen 1 is overlaid with a red bbox.
-- Screen 2 is unchanged.
-
-Model response handling:
-
-- Logs model `message.content` and token usage (`input/output/total`) to log file.
-- Robust JSON parsing with normalization for `TRUE/FALSE/NULL/None` variants.
-
-## Important Configurations
-
-Edit `CONFIG` in `filter_trace.py`:
-
-- `ROOT_DIR`: dataset root.
-- `OUTPUT_CSV`: output CSV path.
-- `LOG_FILE`: log path.
-- `API_URL`: OpenAI-compatible endpoint.
-- `MODEL`: model id.
-- `MAX_WORKERS`: default parallel folder workers.
-- `MAX_VALID_SAMPLES_PER_APP`: per-app valid quota.
-<!-- - `LARGE_TRAJECTORY_THRESHOLD`: threshold to enable step-margin rule.
-- `MIN_STEP_MARGIN`: minimum sampled step distance for long trajectories.
-- `REQUEST_TIMEOUT`, `MAX_RETRIES`. -->
-
-API key is read from environment variable (if using commercial LLM services):
-
-```bash
-export API_KEY="your_api_key"
-```
-
-[Use vllm to deploy `Qwen3.5-397B-A17B`](https://huggingface.co/Qwen/Qwen3.5-397B-A17B)
-
-```
-vllm serve Qwen/Qwen3.5-397B-A17B --port 8000 --tensor-parallel-size 8 --max-model-len 40960 --reasoning-parser qwen3 --host=xx.xx.xx.xx
-```
-
-Then fix the `API_URL` and `MODEL` field in `CONFIG`
-
-## How To Run The Filter
-
-Default workers (from config):
+Filter raw traces:
 
 ```bash
 python3 filter_trace.py
 ```
 
-Override worker count:
+Preview filtered results:
 
 ```bash
-python3 filter_trace.py --max-workers 8
+./generate_filtered_preview.sh
 ```
 
-## Output Files
-
-### CSV (`filter_mv_trace.csv` by default)
-
-Columns:
-
-- `app_name`
-- `from_screen_filename`
-- `to_screen_filename`
-- `action`
-- `valid`
-- `action_valid`
-- `causal_correct`
-- `idm_learnable`
-- `violations`
-- `reason`
-
-### Log (`filter_mv_trace.log` by default)
-
-Contains:
-
-- scan + sampling stats
-- per-app progress
-- model response content
-- token usage per request
-- parse/API errors
-
-## Visualize Results (HTML)
-
-Generate preview HTML:
+Build split metadata (reads all `filtered_metadata/*.csv`):
 
 ```bash
-./generate_transition_preview.sh
+python3 generate_split.py
 ```
 
-Or directly:
+Extract compact test subset:
 
 ```bash
-python3 generate_transition_preview.py \
-  --csv filter_mv_trace.csv \
-  --root-dir mv_trace_en \
-  --output filter_mv_trace_preview.html
+python3 extract_test_subset.py
 ```
-
-Open `filter_mv_trace_preview.html` in browser.
-
-Viewer features:
-
-- top-level category switch: `Valid` / `Invalid`
-- per-category navigation: `Last` / `Next`
-- side-by-side Screen 1/Screen 2
-- metadata in center panel (app/action/violations/reason)
-- Screen 1 bbox highlight parsed from action field
-
-## Notes For Large-Scale Runs
-
-For very large datasets (e.g. 30k+ folders):
-
-- start with moderate `--max-workers` (for example `4~16`) based on API rate limits.
-- watch `filter_mv_trace.log` size (it logs model content).
-- keep resume CSV on fast disk.
-

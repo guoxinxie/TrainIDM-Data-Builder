@@ -6,13 +6,17 @@ import os
 import re
 from pathlib import Path
 
+EVAL_DIR = Path(__file__).resolve().parent
+DEFAULT_CSV = EVAL_DIR / "outputs" / "eval_comparison_outputs.csv"
+DEFAULT_HTML = EVAL_DIR / "outputs" / "eval_comparison_preview.html"
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Generate HTML preview for eval_comparison_outputs.csv with GT/pred overlays."
     )
-    parser.add_argument("--csv", default="eval_comparison_outputs.csv", help="Input eval CSV path.")
-    parser.add_argument("--output", default="eval_comparison_preview.html", help="Output HTML path.")
+    parser.add_argument("--csv", default=str(DEFAULT_CSV), help="Input eval CSV path.")
+    parser.add_argument("--output", default=str(DEFAULT_HTML), help="Output HTML path.")
     return parser.parse_args()
 
 
@@ -504,6 +508,7 @@ def main():
     args = parse_args()
     data = build_data(args.csv, args.output)
     out = Path(args.output)
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(data), encoding="utf-8")
     print(
         f"Generated {out} | matched={len(data['matched'])} | mismatched={len(data['mismatched'])} | error={len(data['error'])}"
