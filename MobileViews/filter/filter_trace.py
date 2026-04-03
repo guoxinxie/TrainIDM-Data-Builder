@@ -13,7 +13,7 @@ from io import BytesIO
 CONFIG = {
     # ================= 路径配置区 =================
     "ROOT_DIR": "./mv_trace_en",  # 输入端：原始数据集的根目录。程序会遍历该目录下的各个 APP 文件夹读取 utg.js 和截图
-    "REFILTER_INPUT_CSV": "./filter_mv_trace.csv",  # 二轮过滤输入：若该文件存在且非空，则仅对其中 valid=True 的样本复检
+    "REFILTER_INPUT_CSV": "./filtered_metadata/mv_trace_en_all.csv",  # 二轮过滤输入：若该文件存在且非空，则仅对其中 valid=True 的样本复检
     "OUTPUT_CSV": "./filter_mv_trace.csv",  # 输出端：模型评估结果的保存路径。支持断点续传，已存在的数据会自动跳过
     "LOG_FILE": "./filter_mv_trace.log",  # 日志端：运行日志保存路径，用于排查报错（如 API 异常、图片读取失败等）
 

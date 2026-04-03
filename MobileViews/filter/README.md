@@ -57,6 +57,18 @@ Filter raw traces:
 python3 filter_trace.py
 ```
 
+`filter_trace.py` has two automatic modes:
+- If `REFILTER_INPUT_CSV` does not exist (or is empty): run full filtering from `mv_trace_en/` and write to `OUTPUT_CSV`.
+- If `REFILTER_INPUT_CSV` exists and is non-empty: re-filter only previous `valid=True` rows in that CSV, then overwrite that CSV (with a timestamped backup file).
+
+Recommended config for second-round re-filtering:
+- `REFILTER_INPUT_CSV = "./filtered_metadata/mv_trace_en_all.csv"`
+- `ROOT_DIR = "./mv_trace_en"` (or the trace root that matches the CSV)
+- `OUTPUT_CSV` is mainly used for first-round full filtering mode.
+
+Combined first-round CSV:
+- `filtered_metadata/mv_trace_en_all.csv` (merged from `mv_trace_en1.csv` to `mv_trace_en4.csv`)
+
 Preview filtered results:
 
 ```bash
