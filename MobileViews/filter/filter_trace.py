@@ -13,6 +13,7 @@ from io import BytesIO
 CONFIG = {
     # ================= 路径配置区 =================
     "ROOT_DIR": "./mv_trace_en",  # 输入端：原始数据集的根目录。程序会遍历该目录下的各个 APP 文件夹读取 utg.js 和截图
+    "REFILTER_INPUT_CSV": "./filter_mv_trace.csv",  # 二轮过滤输入：若该文件存在且非空，则仅对其中 valid=True 的样本复检
     "OUTPUT_CSV": "./filter_mv_trace.csv",  # 输出端：模型评估结果的保存路径。支持断点续传，已存在的数据会自动跳过
     "LOG_FILE": "./filter_mv_trace.log",  # 日志端：运行日志保存路径，用于排查报错（如 API 异常、图片读取失败等）
 
@@ -85,14 +86,30 @@ The UI change must be stable, unambiguous, and meaningful for learning.
 
 [Rule 7] Invalid Scroll: A scroll action results in minimal, ambiguous, or inconsistent content displacement.
 
+[Rule 8] Partial/Rotated Rendering Defect: Either screen is not fully/cleanly rendered (e.g., only part of the UI is visible after rotation, severe clipping/cropping, stretched layout, or obvious viewport mismatch that prevents reliable action-outcome judgment).
+
+[Rule 9] Bounding Box Misalignment/Scale Error: For bbox-based actions, the highlighted bbox on Screen 1 is clearly wrong (e.g., too small/too large, shifted away from the actual target, or enclosing mostly irrelevant area), making the action target unreliable.
+
+[Rule 10] Synthetic Auth/Text Placeholder Input: set_text uses synthetic placeholder text (e.g., dummy_user_input) on login/register/account-recovery/credential fields (email/phone/password/OTP/username), producing low-value or non-generalizable supervision.
+
+[Rule 11] External/System Handoff: The transition is dominated by leaving the app flow or invoking OS/external surfaces (e.g., app chooser/open-with sheet, browser/social auth handoff, share sheet, external intent target), so the result is not a stable in-app causal outcome.
+
+[Rule 12] Ambiguous Non-Atomic Target Node: The touched element is a generic text/container fragment (e.g., non-clickable child text, blank text node, broad informational paragraph) where the true interactive target is unclear.
+
+[Rule 13] Degenerate Target Box Geometry: The action bbox is geometrically unreliable (e.g., tiny dot/line strip, extreme edge strip, or overly large region covering mostly irrelevant area), making target localization ambiguous.
+
+[Rule 14] Scroll Without Coherent Displacement: A scroll action does not produce clear, directional content movement (or movement is negligible/contradictory), so the transition is not learnable as a scroll effect.
+
+[Rule 15] Corrupted/Blank Visual Evidence: Screen 1 or Screen 2 is blank/black/corrupted/unreadable, preventing trustworthy visual grounding.
+
 DECISION LOGIC & STRICT CONSISTENCY
 
 If NO rules are triggered: valid = true, violations = [], and all criteria fields = true.
 If ANY rule is triggered: valid = false, list ALL triggered rule IDs in violations.
 Consistency: Criteria fields MUST be false if their corresponding rules are triggered:
-- If Rule 1 triggered -> action_valid = false
-- If Rule 2, 3, or 4 triggered -> causal_correct = false
-- If Rule 5, 6, or 7 triggered -> idm_learnable = false
+- If Rule 1, 9, 12, or 13 triggered -> action_valid = false
+- If Rule 2, 3, 4, or 11 triggered -> causal_correct = false
+- If Rule 5, 6, 7, 8, 10, 14, or 15 triggered -> idm_learnable = false
 
 OUTPUT FORMAT
 
@@ -479,6 +496,131 @@ def load_processed_tasks(csv_path):
     return processed_ids, valid_true_count_by_app
 
 
+def _is_true_string(value):
+    return str(value or "").strip().lower() == "true"
+
+
+def _row_task_key(row):
+    return (
+        str(row.get("app_name", "")).strip(),
+        str(row.get("from_screen_filename", "")).strip(),
+        str(row.get("to_screen_filename", "")).strip(),
+        str(row.get("action", "")).strip(),
+    )
+
+
+def _build_task_from_csv_row(row):
+    app_name = str(row.get("app_name", "")).strip()
+    from_name = str(row.get("from_screen_filename", "")).strip()
+    to_name = str(row.get("to_screen_filename", "")).strip()
+    action = str(row.get("action", "")).strip()
+    return {
+        "app_name": app_name,
+        "from_img": os.path.join(CONFIG["ROOT_DIR"], app_name, "states", from_name),
+        "to_img": os.path.join(CONFIG["ROOT_DIR"], app_name, "states", to_name),
+        "action": action,
+    }
+
+
+def refilter_existing_valid_csv(csv_path, max_workers):
+    required = {"app_name", "from_screen_filename", "to_screen_filename", "action", "valid"}
+    update_fields = ["valid", "action_valid", "causal_correct", "idm_learnable", "violations", "reason"]
+
+    with open(csv_path, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+        if not required.issubset(set(fieldnames)):
+            missing = sorted(required - set(fieldnames))
+            logger.warning(
+                f"Existing CSV missing required columns for re-filter mode: {missing}. "
+                f"Falling back to full trace-folder filtering."
+            )
+            return False
+        rows = list(reader)
+
+    if not rows:
+        logger.warning("Existing CSV is empty. Falling back to full trace-folder filtering.")
+        return False
+
+    for col in update_fields:
+        if col not in fieldnames:
+            fieldnames.append(col)
+
+    # Keep one task per unique key, only from rows that were valid=True in previous round.
+    seen_keys = set()
+    valid_rows = []
+    for row in rows:
+        key = _row_task_key(row)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        if _is_true_string(row.get("valid")):
+            valid_rows.append(row)
+
+    if not valid_rows:
+        logger.info("No valid=True rows found in existing CSV. Nothing to re-filter.")
+        return True
+
+    tasks = [_build_task_from_csv_row(row) for row in valid_rows]
+    results = [None] * len(tasks)
+
+    with ThreadPoolExecutor(max_workers=max(1, int(max_workers))) as executor:
+        future_to_idx = {executor.submit(evaluate_transition, task): idx for idx, task in enumerate(tasks)}
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            task = tasks[idx]
+            try:
+                results[idx] = future.result()
+            except Exception as e:
+                results[idx] = {**task_to_row(task), **_error_result(f"Unexpected refilter error: {e}")}
+
+    result_map = {_row_task_key(row): row for row in results if row is not None}
+
+    updated_rows = []
+    round2_valid = 0
+    round2_invalid = 0
+    round2_error = 0
+    changed_count = 0
+
+    for row in rows:
+        key = _row_task_key(row)
+        if _is_true_string(row.get("valid")) and key in result_map:
+            prev_valid = str(row.get("valid", ""))
+            updated = dict(row)
+            round2 = result_map[key]
+            for col in update_fields:
+                updated[col] = round2.get(col, updated.get(col, ""))
+            if str(updated.get("valid", "")) != prev_valid:
+                changed_count += 1
+            valid_value = str(updated.get("valid", "")).strip().lower()
+            if valid_value == "true":
+                round2_valid += 1
+            elif valid_value == "false":
+                round2_invalid += 1
+            else:
+                round2_error += 1
+            updated_rows.append(updated)
+        else:
+            updated_rows.append(row)
+
+    backup_path = f"{csv_path}.backup_before_refilter_{time.strftime('%Y%m%d_%H%M%S')}"
+    os.replace(csv_path, backup_path)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(updated_rows)
+
+    logger.info(">>> Re-filter mode completed using existing valid=True samples only.")
+    logger.info(f"Input/Output CSV: {csv_path}")
+    logger.info(f"Backup created: {backup_path}")
+    logger.info(f"Round-1 valid selected: {len(valid_rows)}")
+    logger.info(f"Round-2 valid: {round2_valid}")
+    logger.info(f"Round-2 invalid: {round2_invalid}")
+    logger.info(f"Round-2 error: {round2_error}")
+    logger.info(f"Rows changed from prior valid=True status: {changed_count}")
+    return True
+
+
 def main(max_workers=None):
     setup_logging()
 
@@ -488,15 +630,30 @@ def main(max_workers=None):
         logger.warning(f"Ignoring invalid --max-workers={max_workers}. Using 1.")
         max_workers = 1
 
-    processed_ids, valid_true_count_by_app = load_processed_tasks(CONFIG["OUTPUT_CSV"])
-    logger.info(">>> Scanning directories and evaluating sampled transitions...")
-
     fieldnames = [
         "app_name", "from_screen_filename", "to_screen_filename", "action",
         "valid", "action_valid", "causal_correct", "idm_learnable",
         "violations", "reason"
     ]
     output_csv_path = CONFIG["OUTPUT_CSV"]
+    refilter_input_csv_path = str(CONFIG.get("REFILTER_INPUT_CSV", "")).strip()
+    if not refilter_input_csv_path:
+        refilter_input_csv_path = output_csv_path
+
+    # Auto mode switch:
+    # - If REFILTER_INPUT_CSV exists and is non-empty: only re-validate previous valid=True rows in that CSV.
+    # - Otherwise: run original full trace-folder filtering logic.
+    if os.path.exists(refilter_input_csv_path) and os.path.getsize(refilter_input_csv_path) > 0:
+        logger.info(
+            f">>> Existing CSV detected at {refilter_input_csv_path}. "
+            "Entering re-filter mode (only prior valid=True rows)."
+        )
+        if refilter_existing_valid_csv(refilter_input_csv_path, max_workers):
+            return
+
+    processed_ids, valid_true_count_by_app = load_processed_tasks(output_csv_path)
+    logger.info(">>> Scanning directories and evaluating sampled transitions...")
+
     need_header = not os.path.exists(output_csv_path) or os.path.getsize(output_csv_path) == 0
 
     app_names = []
