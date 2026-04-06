@@ -92,7 +92,7 @@ conda activate Android-Lab
 pip install -r requirements.txt
 ```
 ## 3.确保您有 KVM 和 Docker
-请点击以下链接下载相关 Docker 文件 [https://drive.google.com/file/d/1SJ79gdO7whgUod3HnuS87aOKihRk1i-U/view?usp =drive_link](https://drive.google.com/file/d/1SJ79gdO7whgUod3HnuS87aOKihRk1i-U/view?usp =drive_link)
+请点击以下链接下载相关 Docker 文件 [https://drive.google.com/file/d/1SJ79gdO7whgUod3HnuS87aOKihRk1i-U/view?usp](https://drive.google.com/file/d/1SJ79gdO7whgUod3HnuS87aOKihRk1i-U/view?usp)
 因为Android-Lab Docker镜像版本久远，建议配置在我的仓库中你只需下载 **Dockerfile**替换掉原来的配置文件
 ```bash
 mkdir docker_file
