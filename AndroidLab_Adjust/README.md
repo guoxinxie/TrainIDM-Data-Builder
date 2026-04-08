@@ -144,4 +144,16 @@ python generate_result.py --input_folder ./logs/evaluation/ --output_folder ./lo
 # glm4评测:
 python generate_result.py --input_folder ./logs/evaluation/ --output_folder ./logs/evaluation/ --output_excel ./logs/evaluation/test_name.xlsx --judge_model glm4 --api_key your api key
 ```
+## 引用与致谢 (References & Acknowledgements)
+```bibtex
 
+@misc{xu2024androidlabtrainingsystematicbenchmarking,
+      title={AndroidLab: Training and Systematic Benchmarking of Android Autonomous Agents}, 
+      author={Yifan Xu and Xiao Liu and Xueqiao Sun and Siyi Cheng and Hao Yu and Hanyu Lai and Shudan Zhang and Dan Zhang and Jie Tang and Yuxiao Dong},
+      year={2024},
+      eprint={2410.24024},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2410.24024}, 
+}
+```
