@@ -47,6 +47,10 @@ eval:
   avd_name: Pixel_7_Pro_API_33
   # ... 其他 AVD 配置
 ```
+| **`ScreenshotMobileTask_AutoTest`** | 带数字标签的截图 (SoM) | `tap(index)` 等Python代码 | 经典 SoM 范式，指代明确 |(**set of mark主要**)
+| **`OriginalImageJSONTask_AutoTest_*`** | **原始截图** | JSON 对象（含坐标） | **无标签视觉**，输出结构化，框架智能映射 |(**set of coordinate主要**)
+| **`ScreenReactTask_AutoTest`** | 带数字标签的截图 (SoM) | `Thought` + `Action` | SoM + 思维链，可解释性强 |
+| **`ScreenSeeActTask_AutoTest`** | 带数字标签的截图 (SoM) | 两阶段：自然语言描述 -> `do()` | 模仿“看-指”过程，流程复杂 |
 
 ### 3.2 Qwen3-VL (使用 0-1000 归一化坐标)
 
@@ -109,6 +113,7 @@ docker build -t android_eval:latest .
 * **./evaluation/auto_test.py、evaluation.py、definition.py**
 * **./templates/android_screenshot_template.py**
 * **./page_executor/simple_vision_executor.py和text_executor.py**
+* **./agent/model.py**
 * **./adb_client.py**
 * **./tools/check_result_multiprocess.py**
 ## 5.修改配置文件
