@@ -100,14 +100,19 @@ cd docker_file
 unzip /path/to/your/docker-file.zip
 cd docker-file
 docker build -t android_eval:latest .
+
 ```
+建议换阿里的镜像或者清华的镜像
+
 ## 4.替换文件
 * **./docker_file/docker-file/Dockerfile**
 * **./evaluation/auto_test.py、evaluation.py、definition.py**
 * **./templates/android_screenshot_template.py**
 * **./page_executor/simple_vision_executor.py和text_executor.py**
 * **./adb_client.py**
-## 5.将qwen-2.5-vl-linux.yaml，qwen-3-vl-linux.yaml加入到./configs中并修改相应的模型名称，apikey等参数
+* **./tools/check_result_multiprocess.py**
+## 5.修改配置文件
+将qwen-2.5-vl-linux.yaml，qwen-3-vl-linux.yaml加入到./configs中并修改相应的模型名称，apikey等参数
 
 ## 6.执行命令
 测试一个任务或多个任务
@@ -129,22 +134,31 @@ python eval.py \
 python eval.py \
   -n test \
   -c ./configs/qwen-2.5-vl-linux.yaml
-```
+```（跑完一个模型138个任务约12个小时）
 或者
 ```bash
 python eval.py \
   -n test \
   -c ./configs/qwen-2.5-vl-linux.yaml \
   -p 3
-```
+```（跑完一个模型138个任务约5个小时）
 评测模型
 ```bash
-# gpt-4o-2024-05-13评测:
-export OPENAI_API_KEY='your-api-key-here'
-python generate_result.py --input_folder ./logs/evaluation/ --output_folder ./logs/evaluation/ --output_excel ./logs/evaluation/test_name.xlsx --judge_model gpt-4o-2024-05-13
+# gpt-4o-2024-05-13评测(需要挂vpn):
+python generate_result.py \
+    --input_folder ./logs/evaluation/ \
+    --output_folder ./outputs/ \
+    --output_excel ./outputs/test_result_gpt4o.xlsx \
+    --judge_model openai/gpt-4o \
+    --api_base https://openrouter.ai/api/v1 \
+    --api_key "your-api-key-here"
+```
+```bash
+# 人工验证模型轨迹
+python tools/check_result_multiprocess.py \
+    --directory_path ./logs/evaluation \
+    --save_path ./outputs/visual_results
 
-# glm4评测:
-python generate_result.py --input_folder ./logs/evaluation/ --output_folder ./logs/evaluation/ --output_excel ./logs/evaluation/test_name.xlsx --judge_model glm4 --api_key your api key
 ```
 ## 引用与致谢 (References & Acknowledgements)
 ```bibtex
