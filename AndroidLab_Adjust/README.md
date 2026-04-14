@@ -140,7 +140,7 @@ python eval.py \
 * **没问题就可以开始评测模型**
 ```bash
 python eval.py \
-  -n test \
+  -n test \ # 改成模型名
   -c ./configs/qwen-2.5-vl-linux.yaml
 # （跑完一个模型138个任务约12个小时）
 ```
