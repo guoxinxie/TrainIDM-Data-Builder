@@ -101,13 +101,15 @@ unzip /path/to/your/docker-file.zip
 cd docker-file
 docker build -t android_eval:latest .
 ```
-## 4.替换掉./evaluation/auto_test.py和evaluation.py
+## 4.替换文件
+* **./docker_file/docker-file/Dockerfile**
+* **./evaluation/auto_test.py、evaluation.py、definition.py**
+* **./templates/android_screenshot_template.py**
+* **./page_executor/simple_vision_executor.py和text_executor.py**
+* **./adb_client.py**
+## 5.将qwen-2.5-vl-linux.yaml，qwen-3-vl-linux.yaml加入到./configs中并修改相应的模型名称，apikey等参数
 
-## 5.替换掉./templates中的android_screenshot_template.py
-
-## 6.将qwen-2.5-vl-linux.yaml，qwen-3-vl-linux.yaml加入到./configs中并修改相应的模型名称，apikey等参数
-
-## 7.执行命令
+## 6.执行命令
 测试一个任务或多个任务
 ```bash
 python eval.py \
