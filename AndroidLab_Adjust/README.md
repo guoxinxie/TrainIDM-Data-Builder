@@ -1,11 +1,11 @@
-# AndroidLab: JSON Vision Agent 扩展指南
+# 1.AndroidLab: JSON Vision Agent 扩展指南
 
 本文档介绍了对 AndroidLab 框架的扩展，使其能够原生支持直接输出结构化 JSON 动作指令的多模态大模型（如 Qwen2.5-VL、Qwen3-VL 等）。
 
 AndroidLab 多模态评估流程（如 `ScreenshotTask`）通常依赖模型输出特定格式的单行 Python 代码（如 `tap(1)` 或 `swipe("up")`）。本次扩展允许模型直接观察**无标记（Unlabeled）的原始屏幕截图**，并输出更通用、更易解析的 JSON 格式动作，随后框架会自动将这些 JSON 动作安全地映射并转换为底层执行器（Executor）可执行的代码。
 
 
-## 架构设计
+## 2.架构设计
 
 扩展涉及三个核心组件：
 
