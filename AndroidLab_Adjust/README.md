@@ -123,7 +123,7 @@ docker build -t android_eval:latest .
 将qwen-2.5-vl-linux.yaml，qwen-3-vl-linux.yaml加入到./configs中并修改相应的模型名称，apikey等参数
 
 ## 6.执行命令
-测试一个任务或多个任务
+* **测试一个任务或多个任务**
 ```bash
 python eval.py \
   -n test1 \
@@ -137,20 +137,24 @@ python eval.py \
   --task_id clock_1 bluecoins_1 calendar_1 cantook_1 contacts_1 map_1 pimusic_1 setting_0 zoom_1
 ```
 
-没问题就可以开始评测模型
+* **没问题就可以开始评测模型**
 ```bash
 python eval.py \
   -n test \
   -c ./configs/qwen-2.5-vl-linux.yaml
-```（跑完一个模型138个任务约12个小时）
-或者
+# （跑完一个模型138个任务约12个小时）
+```
+
+* **或者**
 ```bash
 python eval.py \
   -n test \
   -c ./configs/qwen-2.5-vl-linux.yaml \
   -p 3
-```（跑完一个模型138个任务约5个小时）
-评测模型
+# （跑完一个模型138个任务约5个小时）
+```
+
+* **评测模型**
 ```bash
 # gpt-4o-2024-05-13评测(需要挂vpn):
 python generate_result.py \
@@ -161,6 +165,7 @@ python generate_result.py \
     --api_base https://openrouter.ai/api/v1 \
     --api_key "your-api-key-here"
 ```
+
 ```bash
 # 人工验证模型轨迹
 python tools/check_result_multiprocess.py \
