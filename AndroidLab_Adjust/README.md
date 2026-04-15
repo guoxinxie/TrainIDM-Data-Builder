@@ -1,11 +1,11 @@
-# 1.AndroidLab: JSON Vision Agent 扩展指南
+# AndroidLab: JSON Vision Agent 扩展指南
 
 本文档介绍了对 AndroidLab 框架的扩展，使其能够原生支持直接输出结构化 JSON 动作指令的多模态大模型（如 Qwen2.5-VL、Qwen3-VL 等）。
 
 AndroidLab 多模态评估流程（如 `ScreenshotTask`）通常依赖模型输出特定格式的单行 Python 代码（如 `tap(1)` 或 `swipe("up")`）。本次扩展允许模型直接观察**无标记（Unlabeled）的原始屏幕截图**，并输出更通用、更易解析的 JSON 格式动作，随后框架会自动将这些 JSON 动作安全地映射并转换为底层执行器（Executor）可执行的代码。
 
 
-## 2.架构设计
+## 1.架构设计
 
 扩展涉及三个核心组件：
 
@@ -13,9 +13,9 @@ AndroidLab 多模态评估流程（如 `ScreenshotTask`）通常依赖模型输�
 2.  **Agent Task (任务处理器)**：定义在 `evaluation/evaluation.py` 中。负责拼接 Prompt、调用模型 API、接收 JSON 字符串，并将其**转换（Translate）** 为执行器可识别的 Python 代码。
 3.  **AutoTest Class (测试启动器)**：定义在 `evaluation/auto_test.py` 中。负责组装 Agent 和 Executor，并注册到配置系统中供 `eval.py` 调用。
 
-## 3. 支持的模型与使用方法
+## 2. 支持的模型与使用方法
 
-### 3.1 Qwen2.5-VL (使用绝对像素坐标)
+### 2.1 Qwen2.5-VL (使用绝对像素坐标)
 
 Qwen2.5-VL 被配置为输出与设备真实分辨率一致的绝对像素坐标。
 
@@ -55,7 +55,7 @@ eval:
  
  **`ScreenSeeActTask_AutoTest`** | 带数字标签的截图 (SoM) | 两阶段：自然语言描述 -> `do()` | 模仿“看-指”过程，流程复杂 |
 
-### 3.2 Qwen3-VL (使用 0-1000 归一化坐标)
+### 2.2 Qwen3-VL (使用 0-1000 归一化坐标)
 
 Qwen3-VL 原生输出 0-1000 的归一化坐标，框架会根据运行时获取的屏幕宽高动态转换。
 
