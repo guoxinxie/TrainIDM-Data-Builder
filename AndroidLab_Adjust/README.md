@@ -117,7 +117,7 @@ docker build -t android_eval:latest .
 * **./templates/android_screenshot_template.py**
 * **./page_executor/simple_vision_executor.py和text_executor.py**
 * **./agent/model.py**
-* **./adb_client.py**
+* **./adb_client.py、check_missing_tasks.py**
 * **./tools/check_result_multiprocess.py**
 ## 5.修改配置文件
 将qwen-2.5-vl-linux.yaml，qwen-3-vl-linux.yaml加入到./configs中并修改相应的模型名称，apikey等参数
@@ -126,7 +126,7 @@ docker build -t android_eval:latest .
 * **测试一个任务或多个任务**
 ```bash
 python eval.py \
-  -n test1 \
+  -n test \
   -c ./configs/qwen-2.5-vl-linux.yaml\
   --task_id zoom_1
 ```
@@ -136,7 +136,8 @@ python eval.py \
   -c ./configs/qwen-2.5-vl-linux.yaml\
   --task_id clock_1 bluecoins_1 calendar_1 cantook_1 contacts_1 map_1 pimusic_1 setting_0 zoom_1
 ```
-
+* **Tips:如果中途中断或者是重复运行需要把对应的文件夹删去，如test1中途中断中断在map_1（未完成）需要将对应的文件夹删去，否则就会跳过，跳过的逻辑是是否存在该文件夹**
+  
 * **没问题就可以开始评测模型**
 ```bash
 python eval.py \
@@ -154,6 +155,12 @@ python eval.py \
 # （跑完一个模型138个任务约5个小时）
 ```
 
+* **跑完模型建议检查是否完整**
+```bash
+
+python check_missing_tasks.py ./logs/evaluation/test_name # 你的模型名
+
+```
 * **评测模型**
 ```bash
 # gpt-4o-2024-05-13评测(需要挂vpn):
@@ -173,6 +180,9 @@ python tools/check_result_multiprocess.py \
     --save_path ./outputs/visual_results
 
 ```
+
+
+
 ## 引用与致谢 (References & Acknowledgements)
 ```bibtex
 
