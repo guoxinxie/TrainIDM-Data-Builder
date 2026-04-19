@@ -7,6 +7,7 @@ Use this folder to evaluate IDM agent performance on the extracted test subset.
 - `eval.py`: main evaluation entrypoint.
 - `agent.py`: model inference agent used by evaluation.
 - `generate_eval_preview.py`: HTML preview for evaluation outputs.
+- `filter_infeasible_samples.py`: remove marked infeasible samples from `test_subset/split_test.csv`.
 - `navigate_back_alt_list.py`: aliases for matching `navigate_back`.
 - `outputs/`: generated eval CSV/HTML.
 
@@ -49,11 +50,60 @@ Run only part of test samples:
 python3 eval/eval.py -n 1000
 ```
 
+Run a random subset with a fixed seed:
+
+```bash
+python3 eval/eval.py -n 1000 -s 91010
+```
+
+Defaults can also be configured directly in `eval/eval.py`:
+- `MAX_TEST_SAMPLES`
+- `SAMPLE_SELECTION_SEED`
+
 ## Generate Eval Preview
 
 ```bash
 python3 eval/generate_eval_preview.py
 ```
 
+For cross-model summary CSV (`any_model_matched` / `all_models_not_matched`):
+
+```bash
+python3 eval/build_cross_model_correctness_csv.py
+python3 eval/generate_eval_preview.py \
+  --csv eval/outputs/cross_model_analysis/all_models_correctness.csv \
+  --match-column any_model_matched \
+  --output eval/outputs/cross_model_analysis/all_models_correctness_preview.html
+```
+
 Open:
 - `eval/outputs/eval_comparison_preview.html`
+
+## Mark Infeasible Samples (Human Review)
+
+In `eval_comparison_preview.html`:
+- Use `Mark Infeasible` / `Unmark Infeasible` while browsing samples.
+- Marks are saved in browser `localStorage`.
+- Use `Export Marks JSON` (recommended) or `Export Marks TXT`.
+
+Then move exported file (for example `infeasible_marks.json`) to:
+- `eval/outputs/infeasible_marks.json`
+
+## Filter Marked Samples Out of Test Set
+
+```bash
+python3 eval/filter_infeasible_samples.py
+```
+
+Outputs:
+- `test_subset/split_test_feasible.csv`
+- `test_subset/split_test_infeasible.csv`
+- `eval/outputs/infeasible_filter_summary.txt`
+
+For repeated human-review rounds, run one command:
+
+```bash
+bash eval/apply_infeasible_marks.sh
+```
+
+This will backup `split_test.csv`, apply filtering, replace `split_test.csv` with feasible rows, and archive removed rows with a timestamp.

@@ -4,11 +4,23 @@ import csv
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 EVAL_DIR = Path(__file__).resolve().parent
 DEFAULT_CSV = EVAL_DIR / "outputs" / "eval_comparison_outputs.csv"
 DEFAULT_HTML = EVAL_DIR / "outputs" / "eval_comparison_preview.html"
+
+
+def configure_csv_field_size_limit():
+    # Allow very large fields (for example long raw model outputs) in eval CSV rows.
+    limit = sys.maxsize
+    while True:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit = limit // 10
 
 
 def parse_args():
@@ -17,6 +29,14 @@ def parse_args():
     )
     parser.add_argument("--csv", default=str(DEFAULT_CSV), help="Input eval CSV path.")
     parser.add_argument("--output", default=str(DEFAULT_HTML), help="Output HTML path.")
+    parser.add_argument(
+        "--match-column",
+        default="exact_action_match",
+        help=(
+            "Column used as correctness label for matched/mismatched split "
+            "(default: exact_action_match)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -109,14 +129,14 @@ def resolve_image_path(path_str, output_parent):
     return Path(os.path.relpath(p, output_parent)).as_posix()
 
 
-def build_data(csv_path, output_html):
+def build_data(csv_path, output_html, match_column="exact_action_match"):
     data = {"matched": [], "mismatched": [], "error": []}
     output_parent = Path(output_html).resolve().parent
 
     with open(csv_path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for idx, row in enumerate(reader, start=1):
-            exact_action_match = parse_bool(row.get("exact_action_match"))
+            exact_action_match = parse_bool(row.get(match_column))
             agent_ok = parse_bool(row.get("agent_ok"))
 
             if agent_ok is False:
@@ -134,19 +154,22 @@ def build_data(csv_path, output_html):
             data[category].append(
                 {
                     "id": idx,
+                    "sample_id": row.get("sample_id", ""),
                     "app_name": row.get("app_name", ""),
                     "ground_truth_action": row.get("ground_truth_action", ""),
                     "ground_truth_action_type": row.get("ground_truth_action_type", ""),
                     "predicted_action": row.get("predicted_action", ""),
                     "predicted_action_type": row.get("predicted_action_type", ""),
                     "action_type_match": row.get("action_type_match", ""),
-                    "exact_action_match": row.get("exact_action_match", ""),
+                    "exact_action_match": row.get(match_column, ""),
                     "agent_ok": row.get("agent_ok", ""),
                     "agent_error": row.get("agent_error", ""),
                     "gt_bbox": extract_bbox_from_gt_action(row.get("ground_truth_action", "")),
                     "pred_point": pred["point"],
                     "pred_type": pred["type"],
                     "pred_direction": pred["direction"],
+                    "before_state_path": row.get("before_state_path", ""),
+                    "after_state_path": row.get("after_state_path", ""),
                     "from_img": from_rel,
                     "to_img": to_rel,
                     "from_name": os.path.basename(row.get("before_state_path", "")),
@@ -233,6 +256,7 @@ def render_html(data):
     .legend-box {{ display:inline-block; width:14px; height:10px; margin-right:4px; vertical-align:middle; border:2px solid var(--gt); background: rgba(220,38,38,.16); }}
     .action-value {{ font-weight: 700; color: #111827; word-break: break-word; }}
     .mono {{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; word-break: break-all; }}
+    .marked-text {{ color: #b45309; font-weight: 700; }}
     .missing {{ padding: 16px; color: #b91c1c; font-size: 13px; }}
     @media (max-width: 900px) {{
       .images {{ grid-template-columns: 1fr; }}
@@ -253,6 +277,13 @@ def render_html(data):
         <button id=\"btn-next\">Next</button>
         <span id=\"position\" class=\"meta\"></span>
       </div>
+      <div class=\"row\" style=\"margin-top:10px;\">
+        <button id=\"btn-toggle-mark\">Mark Infeasible</button>
+        <button id=\"btn-export-marks-json\">Export Marks JSON</button>
+        <button id=\"btn-export-marks-txt\">Export Marks TXT</button>
+        <button id=\"btn-clear-marks\">Clear Marks</button>
+        <span id=\"marked-count\" class=\"meta\"></span>
+      </div>
       <div id=\"summary\" class=\"meta\"></div>
       <div class=\"images\">
         <div class=\"card\">
@@ -267,6 +298,7 @@ def render_html(data):
             <div><span class=\"label\">GT Action:</span> <span id=\"gt-action\" class=\"action-value\">-</span></div>
             <div><span class=\"label\">Pred Action:</span> <span id=\"pred-action\" class=\"action-value\">-</span></div>
             <div><span class=\"label\">Agent Error:</span> <span id=\"agent-error\" class=\"mono\">-</span></div>
+            <div><span class=\"label\">Infeasible Mark:</span> <span id=\"mark-status\" class=\"marked-text\">No</span></div>
             <div class=\"legend\">
               <span class=\"legend-box\"></span>Ground Truth BBox
               <span style=\"margin-left:10px;\"><span class=\"legend-dot\" style=\"background:#2563eb;\"></span>Predicted Click/LongPress Point</span>
@@ -285,6 +317,7 @@ def render_html(data):
   <script>
     const DATA = JSON.parse(document.getElementById("data-json").textContent);
     const state = {{ category: "matched", idx: {{ matched: 0, mismatched: 0, error: 0 }} }};
+    const MARK_STORAGE_KEY = "eval_infeasible_marks_v1";
 
     const el = {{
       btnMatched: document.getElementById("btn-matched"),
@@ -292,21 +325,163 @@ def render_html(data):
       btnError: document.getElementById("btn-error"),
       btnPrev: document.getElementById("btn-prev"),
       btnNext: document.getElementById("btn-next"),
+      btnToggleMark: document.getElementById("btn-toggle-mark"),
+      btnExportMarksJson: document.getElementById("btn-export-marks-json"),
+      btnExportMarksTxt: document.getElementById("btn-export-marks-txt"),
+      btnClearMarks: document.getElementById("btn-clear-marks"),
       summary: document.getElementById("summary"),
       pos: document.getElementById("position"),
+      markedCount: document.getElementById("marked-count"),
       app: document.getElementById("app-name"),
       gtAction: document.getElementById("gt-action"),
       predAction: document.getElementById("pred-action"),
       typeMatch: document.getElementById("type-match"),
       exactMatch: document.getElementById("exact-match"),
       agentError: document.getElementById("agent-error"),
+      markStatus: document.getElementById("mark-status"),
       fromWrap: document.getElementById("from-wrap"),
       toWrap: document.getElementById("to-wrap"),
     }};
 
+    const markedMap = loadMarkedMap();
+
     function currentItems() {{ return DATA[state.category] || []; }}
     function currentIndex() {{ return state.idx[state.category] || 0; }}
     function setCurrentIndex(i) {{ state.idx[state.category] = i; }}
+    function currentItem() {{
+      const items = currentItems();
+      if (!items.length) return null;
+      const idx = currentIndex();
+      if (idx < 0 || idx >= items.length) return null;
+      return items[idx];
+    }}
+
+    function makeMarkRecord(item) {{
+      return {{
+        sample_id: item.sample_id || "",
+        app_name: item.app_name || "",
+        from_screen_filename: item.from_name || "",
+        to_screen_filename: item.to_name || "",
+        ground_truth_action: item.ground_truth_action || "",
+        before_state_path: item.before_state_path || "",
+        after_state_path: item.after_state_path || "",
+      }};
+    }}
+
+    function markKey(rec) {{
+      return [
+        rec.sample_id || "",
+        rec.app_name || "",
+        rec.from_screen_filename || "",
+        rec.to_screen_filename || "",
+        rec.ground_truth_action || "",
+      ].join("\\t");
+    }}
+
+    function loadMarkedMap() {{
+      try {{
+        const raw = localStorage.getItem(MARK_STORAGE_KEY);
+        if (!raw) return {{}};
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return {{}};
+        const out = {{}};
+        for (const rec of arr) {{
+          if (!rec || typeof rec !== "object") continue;
+          out[markKey(rec)] = rec;
+        }}
+        return out;
+      }} catch (e) {{
+        return {{}};
+      }}
+    }}
+
+    function saveMarkedMap() {{
+      localStorage.setItem(MARK_STORAGE_KEY, JSON.stringify(Object.values(markedMap)));
+    }}
+
+    function isCurrentMarked() {{
+      const item = currentItem();
+      if (!item) return false;
+      return !!markedMap[markKey(makeMarkRecord(item))];
+    }}
+
+    function updateMarkedUi() {{
+      const count = Object.keys(markedMap).length;
+      el.markedCount.textContent = `Marked infeasible: ${{count}}`;
+      const item = currentItem();
+      if (!item) {{
+        el.btnToggleMark.disabled = true;
+        el.btnToggleMark.textContent = "Mark Infeasible";
+        el.markStatus.textContent = "-";
+        return;
+      }}
+      el.btnToggleMark.disabled = false;
+      if (isCurrentMarked()) {{
+        el.btnToggleMark.textContent = "Unmark Infeasible";
+        el.markStatus.textContent = "Yes";
+      }} else {{
+        el.btnToggleMark.textContent = "Mark Infeasible";
+        el.markStatus.textContent = "No";
+      }}
+    }}
+
+    function toggleCurrentMark() {{
+      const item = currentItem();
+      if (!item) return;
+      const rec = makeMarkRecord(item);
+      const key = markKey(rec);
+      if (markedMap[key]) {{
+        delete markedMap[key];
+      }} else {{
+        markedMap[key] = rec;
+      }}
+      saveMarkedMap();
+      render();
+    }}
+
+    function downloadTextFile(filename, text) {{
+      const blob = new Blob([text], {{ type: "text/plain;charset=utf-8" }});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }}
+
+    function exportMarksJson() {{
+      const rows = Object.values(markedMap);
+      downloadTextFile("infeasible_marks.json", JSON.stringify(rows, null, 2));
+    }}
+
+    function exportMarksTxt() {{
+      const header = "sample_id\\tapp_name\\tfrom_screen_filename\\tto_screen_filename\\tground_truth_action\\tbefore_state_path\\tafter_state_path";
+      const lines = [header];
+      const rows = Object.values(markedMap);
+      for (const rec of rows) {{
+        lines.push([
+          rec.sample_id || "",
+          rec.app_name || "",
+          rec.from_screen_filename || "",
+          rec.to_screen_filename || "",
+          rec.ground_truth_action || "",
+          rec.before_state_path || "",
+          rec.after_state_path || "",
+        ].join("\\t"));
+      }}
+      downloadTextFile("infeasible_marks.txt", lines.join("\\n"));
+    }}
+
+    function clearMarks() {{
+      if (!confirm("Clear all infeasible marks?")) return;
+      for (const key of Object.keys(markedMap)) {{
+        delete markedMap[key];
+      }}
+      saveMarkedMap();
+      render();
+    }}
 
     function boolBadge(value) {{
       const text = String(value || "").trim().toLowerCase();
@@ -458,8 +633,10 @@ def render_html(data):
         el.typeMatch.innerHTML = boolBadge("");
         el.exactMatch.innerHTML = boolBadge("");
         el.agentError.textContent = "-";
+        el.markStatus.textContent = "-";
         renderImageWithOverlays(el.fromWrap, "", "", null, null, "", "");
         renderImageSimple(el.toWrap, "", "");
+        updateMarkedUi();
         return;
       }}
 
@@ -485,6 +662,7 @@ def render_html(data):
         item.pred_direction
       );
       renderImageSimple(el.toWrap, item.to_img, item.to_name);
+      updateMarkedUi();
     }}
 
     el.btnMatched.onclick = () => {{ state.category = "matched"; render(); }};
@@ -492,9 +670,14 @@ def render_html(data):
     el.btnError.onclick = () => {{ state.category = "error"; render(); }};
     el.btnPrev.onclick = () => {{ setCurrentIndex(currentIndex() - 1); render(); }};
     el.btnNext.onclick = () => {{ setCurrentIndex(currentIndex() + 1); render(); }};
+    el.btnToggleMark.onclick = () => {{ toggleCurrentMark(); }};
+    el.btnExportMarksJson.onclick = () => {{ exportMarksJson(); }};
+    el.btnExportMarksTxt.onclick = () => {{ exportMarksTxt(); }};
+    el.btnClearMarks.onclick = () => {{ clearMarks(); }};
     document.addEventListener("keydown", (e) => {{
       if (e.key === "ArrowLeft") el.btnPrev.click();
       if (e.key === "ArrowRight") el.btnNext.click();
+      if (e.key === "m" || e.key === "M") el.btnToggleMark.click();
     }});
 
     render();
@@ -505,8 +688,9 @@ def render_html(data):
 
 
 def main():
+    configure_csv_field_size_limit()
     args = parse_args()
-    data = build_data(args.csv, args.output)
+    data = build_data(args.csv, args.output, args.match_column)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(render_html(data), encoding="utf-8")

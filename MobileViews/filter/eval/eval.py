@@ -2,10 +2,17 @@ import argparse
 import csv
 import importlib.util
 import json
-import os
+import random
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List
+
+try:
+    from tqdm import tqdm
+except Exception:
+    def tqdm(iterable, **kwargs):
+        return iterable
 
 EVAL_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = EVAL_DIR.parent
@@ -27,8 +34,13 @@ TRACE_DIR = PROJECT_ROOT / "test_subset" / "mv_trace_en"
 AGENT_NAME = "remote_vlm"
 OUTPUT_DIR = EVAL_DIR / "outputs"
 COMPARISON_CSV_PATH = OUTPUT_DIR / "eval_comparison_outputs.csv"
+ERROR_LOG_PATH = OUTPUT_DIR / "eval_agent_errors.log"
 # Set to an integer (e.g. 1000) to cap test samples, or None for all samples.
 MAX_TEST_SAMPLES = None
+# Seed used when randomly selecting MAX_TEST_SAMPLES from all valid test samples.
+# Only takes effect when MAX_TEST_SAMPLES is a positive integer.
+SAMPLE_SELECTION_SEED = int("91010")
+MAX_WORKERS = 12
 
 
 def parse_args():
@@ -39,6 +51,23 @@ def parse_args():
         type=int,
         default=None,
         help="Maximum number of valid test samples to evaluate. Default: use MAX_TEST_SAMPLES in script.",
+    )
+    parser.add_argument(
+        "-w",
+        "--max-workers",
+        type=int,
+        default=MAX_WORKERS,
+        help=f"Thread pool size for agent inference. Default: {MAX_WORKERS}.",
+    )
+    parser.add_argument(
+        "-s",
+        "--sample-seed",
+        type=int,
+        default=None,
+        help=(
+            "Random seed for selecting --max-test-samples from all valid samples. "
+            "Default: use SAMPLE_SELECTION_SEED in script."
+        ),
     )
     return parser.parse_args()
 
@@ -325,8 +354,13 @@ def _resolve_state_path(trace_dir, app_name: str, filename: str) -> str:
     return str(Path(trace_dir) / app_name / "states" / filename)
 
 
-def extract_valid_true_samples(csv_path, trace_dir=TRACE_DIR, max_samples=MAX_TEST_SAMPLES) -> List[Dict[str, Any]]:
-    """Read split_test CSV and keep rows with valid=TRUE."""
+def extract_valid_true_samples(
+    csv_path,
+    trace_dir=TRACE_DIR,
+    max_samples=MAX_TEST_SAMPLES,
+    sample_seed=SAMPLE_SELECTION_SEED,
+) -> List[Dict[str, Any]]:
+    """Read split_test CSV, keep rows with valid=TRUE, and optionally random-sample by seed."""
     samples: List[Dict[str, Any]] = []
 
     with open(csv_path, "r", newline="", encoding="utf-8") as f:
@@ -351,8 +385,9 @@ def extract_valid_true_samples(csv_path, trace_dir=TRACE_DIR, max_samples=MAX_TE
                 }
             )
 
-            if isinstance(max_samples, int) and max_samples > 0 and len(samples) >= max_samples:
-                break
+    if isinstance(max_samples, int) and max_samples > 0 and len(samples) > max_samples:
+        rng = random.Random(sample_seed)
+        samples = rng.sample(samples, max_samples)
 
     return samples
 
@@ -363,38 +398,218 @@ def _load_agent_registry():
     return AGENT_REGISTRY
 
 
-def run_agents_on_samples(samples: List[Dict[str, Any]], agent_name: str = AGENT_NAME) -> List[Dict[str, Any]]:
+def _parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    text = str(value or "").strip().lower()
+    if text in {"true", "1", "yes", "y"}:
+        return True
+    if text in {"false", "0", "no", "n"}:
+        return False
+    return None
+
+
+def log_agent_errors(records: List[Dict[str, Any]], log_path=ERROR_LOG_PATH) -> int:
+    messages = []
+    for item in records:
+        agent_ok = _parse_bool(item.get("agent_ok"))
+        agent_error = str(item.get("agent_error", "")).strip()
+        if agent_ok is False or agent_error:
+            sample_id = item.get("sample_id", "")
+            app_name = item.get("app_name", "")
+            error_text = agent_error if agent_error else "agent_ok=false (empty agent_error)"
+            msg = f"[agent_error] sample_id={sample_id} app_name={app_name} error={error_text}"
+            messages.append(msg)
+
+    log_path = Path(log_path)
+    if log_path.exists():
+        log_path.unlink()
+
+    if not messages:
+        print("Agent errors: 0")
+        return 0
+
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(messages) + "\n")
+
+    print(f"Agent errors: {len(messages)}")
+    print(f"Error log saved: {log_path}")
+    for msg in messages:
+        print(msg)
+
+    return len(messages)
+
+
+def run_agents_on_samples(
+    samples: List[Dict[str, Any]],
+    agent_name: str = AGENT_NAME,
+    max_workers: int = MAX_WORKERS,
+) -> List[Dict[str, Any]]:
     """Feed each sample to one selected agent in agent.py and collect raw outputs."""
     AGENT_REGISTRY = _load_agent_registry()
     if agent_name not in AGENT_REGISTRY:
         raise ValueError(f"Unknown agent: {agent_name}. Available: {list(AGENT_REGISTRY.keys())}")
 
     agent_fn = AGENT_REGISTRY[agent_name]
-    outputs: List[Dict[str, Any]] = []
+    outputs: List[Dict[str, Any]] = [None] * len(samples)
 
-    for sample in samples:
+    def _run_one(sample: Dict[str, Any]) -> Dict[str, Any]:
         try:
             result = agent_fn(sample["before_state_path"], sample["after_state_path"])
         except Exception as e:
             result = {"ok": False, "error": f"Agent call failed: {e}"}
 
         predicted_action = str(result.get("action", ""))
-        outputs.append(
-            {
-                "sample_id": sample["sample_id"],
-                "agent_name": agent_name,
-                "app_name": sample["app_name"],
-                "before_state_path": sample["before_state_path"],
-                "after_state_path": sample["after_state_path"],
-                "ground_truth_action": sample["ground_truth_action"],
-                "ground_truth_action_type": sample["ground_truth_action_type"],
-                "agent_ok": bool(result.get("ok", False)),
-                "agent_error": str(result.get("error", "")),
-                "predicted_action": predicted_action,
-                "predicted_action_type": _extract_action_type(predicted_action),
-                "agent_raw_output": str(result.get("raw_output", "")),
+        return {
+            "sample_id": sample["sample_id"],
+            "agent_name": agent_name,
+            "app_name": sample["app_name"],
+            "before_state_path": sample["before_state_path"],
+            "after_state_path": sample["after_state_path"],
+            "ground_truth_action": sample["ground_truth_action"],
+            "ground_truth_action_type": sample["ground_truth_action_type"],
+            "agent_ok": bool(result.get("ok", False)),
+            "agent_error": str(result.get("error", "")),
+            "predicted_action": predicted_action,
+            "predicted_action_type": _extract_action_type(predicted_action),
+            "agent_raw_output": str(result.get("raw_output", "")),
+        }
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_index = {
+            executor.submit(_run_one, sample): idx
+            for idx, sample in enumerate(samples)
+        }
+        for future in tqdm(
+            as_completed(future_to_index),
+            total=len(samples),
+            desc="Evaluating",
+            unit="sample",
+        ):
+            idx = future_to_index[future]
+            outputs[idx] = future.result()
+
+    return outputs
+
+
+def prepare_comparison_row(item: Dict[str, Any]) -> Dict[str, Any]:
+    action_type_match = evaluate_action_type_match(
+        item.get("predicted_action", ""),
+        item.get("ground_truth_action", ""),
+    )
+    exact_action_match = evaluate_action(
+        item.get("predicted_action", ""),
+        item.get("ground_truth_action", ""),
+    )
+    return {
+        "sample_id": item.get("sample_id"),
+        "agent_name": item.get("agent_name", ""),
+        "app_name": item.get("app_name", ""),
+        "before_state_path": item.get("before_state_path", ""),
+        "after_state_path": item.get("after_state_path", ""),
+        "ground_truth_action": item.get("ground_truth_action", ""),
+        "ground_truth_action_type": item.get("ground_truth_action_type", ""),
+        "predicted_action": item.get("predicted_action", ""),
+        "predicted_action_type": item.get("predicted_action_type", ""),
+        "agent_ok": item.get("agent_ok", False),
+        "agent_error": item.get("agent_error", ""),
+        "agent_raw_output": item.get("agent_raw_output", ""),
+        "action_type_match": action_type_match,
+        "exact_action_match": exact_action_match,
+    }
+
+
+def run_agents_on_samples_stream_to_csv(
+    samples: List[Dict[str, Any]],
+    csv_path=COMPARISON_CSV_PATH,
+    agent_name: str = AGENT_NAME,
+    max_workers: int = MAX_WORKERS,
+) -> List[Dict[str, Any]]:
+    """
+    Run inference and stream comparison rows to CSV during evaluation.
+    Rows are flushed in input order as soon as each contiguous prefix is ready.
+    """
+    AGENT_REGISTRY = _load_agent_registry()
+    if agent_name not in AGENT_REGISTRY:
+        raise ValueError(f"Unknown agent: {agent_name}. Available: {list(AGENT_REGISTRY.keys())}")
+
+    agent_fn = AGENT_REGISTRY[agent_name]
+    outputs: List[Dict[str, Any]] = [None] * len(samples)
+
+    def _run_one(sample: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            result = agent_fn(sample["before_state_path"], sample["after_state_path"])
+        except Exception as e:
+            result = {"ok": False, "error": f"Agent call failed: {e}"}
+
+        predicted_action = str(result.get("action", ""))
+        return {
+            "sample_id": sample["sample_id"],
+            "agent_name": agent_name,
+            "app_name": sample["app_name"],
+            "before_state_path": sample["before_state_path"],
+            "after_state_path": sample["after_state_path"],
+            "ground_truth_action": sample["ground_truth_action"],
+            "ground_truth_action_type": sample["ground_truth_action_type"],
+            "agent_ok": bool(result.get("ok", False)),
+            "agent_error": str(result.get("error", "")),
+            "predicted_action": predicted_action,
+            "predicted_action_type": _extract_action_type(predicted_action),
+            "agent_raw_output": str(result.get("raw_output", "")),
+        }
+
+    Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=COMPARISON_FIELDNAMES)
+        writer.writeheader()
+        f.flush()
+
+        pending_rows: Dict[int, Dict[str, Any]] = {}
+        next_write_idx = 0
+        total_samples = len(samples)
+        completed_samples = 0
+        correct_samples = 0
+        progress_log_interval = 50
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(_run_one, sample): idx
+                for idx, sample in enumerate(samples)
             }
-        )
+            for future in tqdm(
+                as_completed(future_to_index),
+                total=len(samples),
+                desc="Evaluating",
+                unit="sample",
+            ):
+                idx = future_to_index[future]
+                output = future.result()
+                outputs[idx] = output
+                comparison_row = prepare_comparison_row(output)
+                pending_rows[idx] = comparison_row
+
+                completed_samples += 1
+                if bool(comparison_row.get("exact_action_match")):
+                    correct_samples += 1
+
+                if (
+                    completed_samples % progress_log_interval == 0
+                    or completed_samples == total_samples
+                ):
+                    print(
+                        f"[progress] correct={correct_samples}/{completed_samples} "
+                        f"(completed={completed_samples}/{total_samples})"
+                    )
+
+                wrote_any = False
+                while next_write_idx in pending_rows:
+                    row = pending_rows.pop(next_write_idx)
+                    writer.writerow({key: row.get(key) for key in COMPARISON_FIELDNAMES})
+                    next_write_idx += 1
+                    wrote_any = True
+                if wrote_any:
+                    f.flush()
 
     return outputs
 
@@ -407,32 +622,7 @@ def prepare_comparison_fields(agent_outputs: List[Dict[str, Any]]) -> List[Dict[
     rows: List[Dict[str, Any]] = []
 
     for item in agent_outputs:
-        action_type_match = evaluate_action_type_match(
-            item.get("predicted_action", ""),
-            item.get("ground_truth_action", ""),
-        )
-        exact_action_match = evaluate_action(
-            item.get("predicted_action", ""),
-            item.get("ground_truth_action", ""),
-        )
-        rows.append(
-            {
-                "sample_id": item.get("sample_id"),
-                "agent_name": item.get("agent_name", ""),
-                "app_name": item.get("app_name", ""),
-                "before_state_path": item.get("before_state_path", ""),
-                "after_state_path": item.get("after_state_path", ""),
-                "ground_truth_action": item.get("ground_truth_action", ""),
-                "ground_truth_action_type": item.get("ground_truth_action_type", ""),
-                "predicted_action": item.get("predicted_action", ""),
-                "predicted_action_type": item.get("predicted_action_type", ""),
-                "agent_ok": item.get("agent_ok", False),
-                "agent_error": item.get("agent_error", ""),
-                "agent_raw_output": item.get("agent_raw_output", ""),
-                "action_type_match": action_type_match,
-                "exact_action_match": exact_action_match,
-            }
-        )
+        rows.append(prepare_comparison_row(item))
 
     return rows
 
@@ -459,15 +649,23 @@ if __name__ == "__main__":
     args = parse_args()
     if args.max_test_samples is not None and args.max_test_samples <= 0:
         raise ValueError("--max-test-samples must be a positive integer.")
+    if args.max_workers is not None and args.max_workers <= 0:
+        raise ValueError("--max-workers must be a positive integer.")
 
     effective_max_test_samples = (
         args.max_test_samples if args.max_test_samples is not None else MAX_TEST_SAMPLES
     )
+    effective_sample_seed = (
+        args.sample_seed if args.sample_seed is not None else SAMPLE_SELECTION_SEED
+    )
+    effective_max_workers = args.max_workers if args.max_workers is not None else MAX_WORKERS
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # If max-test-samples is set via CLI, force a fresh run so the cap takes effect.
-    if COMPARISON_CSV_PATH.exists() and args.max_test_samples is None:
+    is_sampling_mode = isinstance(effective_max_test_samples, int) and effective_max_test_samples > 0
+
+    # In sampling mode, always run fresh inference because subset selection can change.
+    if COMPARISON_CSV_PATH.exists() and not is_sampling_mode:
         cached_rows = load_comparison_fields_from_csv(COMPARISON_CSV_PATH)
         rows = prepare_comparison_fields(cached_rows)
         dump_comparison_fields_to_csv(rows, COMPARISON_CSV_PATH)
@@ -475,16 +673,30 @@ if __name__ == "__main__":
         print(f"Found existing comparison CSV: {COMPARISON_CSV_PATH}")
         print("Skipped model inference. Re-evaluated using cached predictions.")
         print(f"Max test samples: {effective_max_test_samples}")
+        print(f"Sample seed: {effective_sample_seed} (ignored when max test samples is None)")
+        print(f"Max workers: {effective_max_workers}")
         print(f"Prepared comparison rows: {len(rows)}")
         print(f"Saved comparison CSV: {COMPARISON_CSV_PATH}")
+        log_agent_errors(cached_rows, ERROR_LOG_PATH)
     else:
-        samples = extract_valid_true_samples(CSV_PATH, TRACE_DIR, effective_max_test_samples)
-        outputs = run_agents_on_samples(samples, AGENT_NAME)
-        rows = prepare_comparison_fields(outputs)
-        dump_comparison_fields_to_csv(rows, COMPARISON_CSV_PATH)
+        samples = extract_valid_true_samples(
+            CSV_PATH,
+            TRACE_DIR,
+            effective_max_test_samples,
+            effective_sample_seed,
+        )
+        outputs = run_agents_on_samples_stream_to_csv(
+            samples=samples,
+            csv_path=COMPARISON_CSV_PATH,
+            agent_name=AGENT_NAME,
+            max_workers=effective_max_workers,
+        )
 
         print(f"Loaded valid samples: {len(samples)}")
         print(f"Max test samples: {effective_max_test_samples}")
+        print(f"Sample seed: {effective_sample_seed}")
+        print(f"Max workers: {effective_max_workers}")
         print(f"Agent outputs: {len(outputs)}")
-        print(f"Prepared comparison rows: {len(rows)}")
+        print(f"Prepared comparison rows: {len(outputs)}")
         print(f"Saved comparison CSV: {COMPARISON_CSV_PATH}")
+        log_agent_errors(outputs, ERROR_LOG_PATH)

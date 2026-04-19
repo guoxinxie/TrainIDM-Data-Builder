@@ -11,19 +11,32 @@ from PIL import Image
 AGENT_CONFIG = {
     "api_key": os.getenv("API_KEY", ""),
     "api_url": os.getenv("API_URL", "https://openrouter.ai/api/v1/chat/completions"),
-    "model": os.getenv("MODEL", "qwen/qwen3.5-397b-a17b"),
+    # "api_url": os.getenv("API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"),
+    # "model": os.getenv("MODEL", "qwen/qwen3.5-397b-a17b"),
+    # "model": os.getenv("MODEL", "qwen/qwen3-vl-235b-a22b-instruct"),
+    "model": os.getenv("MODEL", "qwen/qwen3-vl-32b-instruct"),
+    # "model": os.getenv("MODEL", "bytedance/ui-tars-1.5-7b"),
+    # "model": os.getenv("MODEL", "google/gemini-3.1-pro-preview"),
     "request_timeout": int(os.getenv("REQUEST_TIMEOUT", "120")),
     "max_retries": int(os.getenv("MAX_RETRIES", "3")),
 }
 
 
 ACTION_INFERENCE_PROMPT = """
-Given two GUI screens:
-- IMAGE 1: before action
-- IMAGE 2: after action
+You are an expert mobile UI automation agent. You are given two screenshots of a mobile application:
+- IMAGE 1: The UI state BEFORE an action is taken.
+- IMAGE 2: The UI state AFTER an action is taken.
 
-Infer one action that causes the transition.
-Return exactly one JSON object using one of these action formats:
+Your task is to deduce the single user action performed on IMAGE 1 that caused the transition to IMAGE 2.
+
+### INSTRUCTIONS:
+1. Compare IMAGE 1 and IMAGE 2. Identify what changed (e.g., a new menu opened, the screen scrolled, a button changed color, text was entered).
+2. Locate the exact UI element in IMAGE 1 that was interacted with to cause this change.
+3. Determine the absolute pixel coordinates (x, y) of the CENTER of that UI element in IMAGE 1. The coordinate (0,0) is the top-left corner of the image.
+4. If the screen scrolled, determine the direction. Note: "scroll down" means the page content moved up so that lower content became visible.
+
+### ACTION SCHEMA:
+Choose exactly ONE action from the following formats:
 1. {"action_type": "click", "x": <integer>, "y": <integer>}
 2. {"action_type": "input_text", "text": "<text>"}
 3. {"action_type": "scroll", "direction": "up" | "left" | "right" | "down"}
@@ -31,8 +44,9 @@ Return exactly one JSON object using one of these action formats:
 5. {"action_type": "long_press", "x": <integer>, "y": <integer>}
 6. {"action_type": "wait"}
 
-Use absolute coordinates in IMAGE 1 pixel space.
-Return JSON only. No extra text.
+### OUTPUT:
+First, provide a brief, step-by-step reasoning of the visual changes and how you deduced the action.
+Then, output the precise action in a standard JSON code block.
 """.strip()
 
 
