@@ -1,3 +1,4 @@
 mv_trace_en
-filtered_metadata
+filtered_metadata*
 test_subset
+eval/outputs/
