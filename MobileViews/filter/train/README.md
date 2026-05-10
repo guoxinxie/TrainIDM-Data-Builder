@@ -28,10 +28,20 @@ In `train/generate_qwenvl_train.py`, check:
 - `TARGET_SPLIT` (usually `train`)
 - `IMAGE_PREFIX`
 
-If your split file is in `filtered_metadata/split.csv`, set:
+Current defaults are:
 
 ```python
-INPUT_SPLIT_CSV = "filtered_metadata/split.csv"
+INPUT_SPLIT_CSV = PROJECT_ROOT / "filtered_metadata_3rd" / "split.csv"
+OUTPUT_JSON = TRAIN_DIR / "split_train_qwenvl.json"
+TARGET_SPLIT = "train"
+IMAGE_PREFIX = PROJECT_ROOT / "mv_trace_en"
+```
+
+To build test JSON, change:
+
+```python
+TARGET_SPLIT = "test"
+OUTPUT_JSON = TRAIN_DIR / "split_test_qwenvl.json"
 ```
 
 ## Run
@@ -42,4 +52,4 @@ python3 train/generate_qwenvl_train.py
 
 ## Output
 
-- JSON file defined by `OUTPUT_JSON` (default currently `split_train_qwenvl.json`).
+- JSON file defined by `OUTPUT_JSON` (default: `train/split_train_qwenvl.json`).

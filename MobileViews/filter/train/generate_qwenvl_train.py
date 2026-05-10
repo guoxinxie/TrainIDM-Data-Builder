@@ -2,12 +2,15 @@ import csv
 import json
 import re
 from collections import Counter
+from pathlib import Path
 
 # ================= Config =================
-INPUT_SPLIT_CSV = "split.csv"
-OUTPUT_JSON = "split_train_qwenvl.json"
+TRAIN_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = TRAIN_DIR.parent
+INPUT_SPLIT_CSV = PROJECT_ROOT / "filtered_metadata_3rd" / "split.csv"
+OUTPUT_JSON = TRAIN_DIR / "split_train_qwenvl.json"
 TARGET_SPLIT = "train"
-IMAGE_PREFIX = "./mv_trace_en"
+IMAGE_PREFIX = PROJECT_ROOT / "mv_trace_en"
 HUMAN_PROMPT = (
     "<image>\n"
     "<image>\n"
@@ -119,7 +122,11 @@ def main():
     stats = Counter()
     skipped = Counter()
 
-    with open(INPUT_SPLIT_CSV, "r", newline="", encoding="utf-8") as f:
+    input_csv = Path(INPUT_SPLIT_CSV)
+    output_json = Path(OUTPUT_JSON)
+    image_prefix = Path(IMAGE_PREFIX)
+
+    with open(input_csv, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             if row.get("split") != TARGET_SPLIT:
@@ -138,8 +145,8 @@ def main():
 
             sample = {
                 "image": [
-                    f"{IMAGE_PREFIX}/{app_name}/states/{from_screen}",
-                    f"{IMAGE_PREFIX}/{app_name}/states/{to_screen}",
+                    str((image_prefix / app_name / "states" / from_screen).as_posix()),
+                    str((image_prefix / app_name / "states" / to_screen).as_posix()),
                 ],
                 "conversations": [
                     {
@@ -155,13 +162,14 @@ def main():
             dataset.append(sample)
             stats[mapped_action["action_type"]] += 1
 
-    with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+    output_json.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_json, "w", encoding="utf-8") as f:
         json.dump(dataset, f, indent=2, ensure_ascii=False)
 
-    print(f"Input CSV: {INPUT_SPLIT_CSV}")
+    print(f"Input CSV: {input_csv}")
     print(f"Target split: {TARGET_SPLIT}")
     print(f"Generated samples: {len(dataset)}")
-    print(f"Output JSON: {OUTPUT_JSON}")
+    print(f"Output JSON: {output_json}")
     print("Mapped action stats:")
     for k in sorted(stats):
         print(f"  {k}: {stats[k]}")

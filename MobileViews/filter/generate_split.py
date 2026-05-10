@@ -5,7 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 
 # ================= Config =================
-INPUT_DIR = Path("filtered_metadata")
+INPUT_DIR = Path("filtered_metadata_3rd")
 OUTPUT_CSV = INPUT_DIR / "split.csv"
 SPLIT_SUMMARIZATION_FILE = INPUT_DIR / "split_summarization.txt"
 TRAIN_RATIO = 0.8
