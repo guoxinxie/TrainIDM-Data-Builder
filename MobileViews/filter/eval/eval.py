@@ -69,6 +69,15 @@ def parse_args():
             "Default: use SAMPLE_SELECTION_SEED in script."
         ),
     )
+    parser.add_argument(
+        "--output-csv",
+        type=str,
+        default=None,
+        help=(
+            "Comparison output CSV path or filename. "
+            "If only a filename is provided, it is saved under eval/outputs/."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -659,24 +668,32 @@ if __name__ == "__main__":
         args.sample_seed if args.sample_seed is not None else SAMPLE_SELECTION_SEED
     )
     effective_max_workers = args.max_workers if args.max_workers is not None else MAX_WORKERS
+    if args.output_csv:
+        requested_output = Path(args.output_csv)
+        if requested_output.parent == Path("."):
+            effective_comparison_csv = OUTPUT_DIR / requested_output.name
+        else:
+            effective_comparison_csv = requested_output
+    else:
+        effective_comparison_csv = COMPARISON_CSV_PATH
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     is_sampling_mode = isinstance(effective_max_test_samples, int) and effective_max_test_samples > 0
 
     # In sampling mode, always run fresh inference because subset selection can change.
-    if COMPARISON_CSV_PATH.exists() and not is_sampling_mode:
-        cached_rows = load_comparison_fields_from_csv(COMPARISON_CSV_PATH)
+    if effective_comparison_csv.exists() and not is_sampling_mode:
+        cached_rows = load_comparison_fields_from_csv(effective_comparison_csv)
         rows = prepare_comparison_fields(cached_rows)
-        dump_comparison_fields_to_csv(rows, COMPARISON_CSV_PATH)
+        dump_comparison_fields_to_csv(rows, effective_comparison_csv)
 
-        print(f"Found existing comparison CSV: {COMPARISON_CSV_PATH}")
+        print(f"Found existing comparison CSV: {effective_comparison_csv}")
         print("Skipped model inference. Re-evaluated using cached predictions.")
         print(f"Max test samples: {effective_max_test_samples}")
         print(f"Sample seed: {effective_sample_seed} (ignored when max test samples is None)")
         print(f"Max workers: {effective_max_workers}")
         print(f"Prepared comparison rows: {len(rows)}")
-        print(f"Saved comparison CSV: {COMPARISON_CSV_PATH}")
+        print(f"Saved comparison CSV: {effective_comparison_csv}")
         log_agent_errors(cached_rows, ERROR_LOG_PATH)
     else:
         samples = extract_valid_true_samples(
@@ -687,7 +704,7 @@ if __name__ == "__main__":
         )
         outputs = run_agents_on_samples_stream_to_csv(
             samples=samples,
-            csv_path=COMPARISON_CSV_PATH,
+            csv_path=effective_comparison_csv,
             agent_name=AGENT_NAME,
             max_workers=effective_max_workers,
         )
@@ -698,5 +715,5 @@ if __name__ == "__main__":
         print(f"Max workers: {effective_max_workers}")
         print(f"Agent outputs: {len(outputs)}")
         print(f"Prepared comparison rows: {len(outputs)}")
-        print(f"Saved comparison CSV: {COMPARISON_CSV_PATH}")
+        print(f"Saved comparison CSV: {effective_comparison_csv}")
         log_agent_errors(outputs, ERROR_LOG_PATH)
