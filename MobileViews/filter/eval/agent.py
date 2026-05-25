@@ -3,7 +3,8 @@ import json
 import os
 import re
 import time
-from typing import Any
+import math
+from typing import Any, Optional, Tuple
 
 import requests
 from PIL import Image
@@ -14,8 +15,8 @@ AGENT_CONFIG = {
     # "api_url": os.getenv("API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"),
     # "model": os.getenv("MODEL", "qwen/qwen3.5-397b-a17b"),
     # "model": os.getenv("MODEL", "qwen/qwen3-vl-235b-a22b-instruct"),
-    "model": os.getenv("MODEL", "qwen/qwen3-vl-32b-instruct"),
-    # "model": os.getenv("MODEL", "bytedance/ui-tars-1.5-7b"),
+    # "model": os.getenv("MODEL", "qwen/qwen3-vl-32b-instruct"),
+    "model": os.getenv("MODEL", "bytedance/ui-tars-1.5-7b"),
     # "model": os.getenv("MODEL", "google/gemini-3.1-pro-preview"),
     "request_timeout": int(os.getenv("REQUEST_TIMEOUT", "120")),
     "max_retries": int(os.getenv("MAX_RETRIES", "3")),
@@ -48,6 +49,56 @@ Choose exactly ONE action from the following formats:
 First, provide a brief, step-by-step reasoning of the visual changes and how you deduced the action.
 Then, output the precise action in a standard JSON code block.
 """.strip()
+
+# copy from: qwen2.5vl vision_process.py
+MAX_RATIO = 200
+SPATIAL_MERGE_SIZE = 2
+IMAGE_MIN_TOKEN_NUM = 4
+IMAGE_MAX_TOKEN_NUM = 16384
+FACTOR = 28
+
+
+def round_by_factor(number: int, factor: int) -> int:
+    """Returns the closest integer to 'number' that is divisible by 'factor'."""
+    return round(number / factor) * factor
+
+
+def ceil_by_factor(number: int, factor: int) -> int:
+    """Returns the smallest integer greater than or equal to 'number' that is divisible by 'factor'."""
+    return math.ceil(number / factor) * factor
+
+
+def floor_by_factor(number: int, factor: int) -> int:
+    """Returns the largest integer less than or equal to 'number' that is divisible by 'factor'."""
+    return math.floor(number / factor) * factor
+
+
+def smart_resize(height: int, width: int, factor: int = FACTOR, min_pixels: Optional[int] = None, max_pixels: Optional[int] = None) -> Tuple[int, int]:
+    """
+    Rescales the image so that the following conditions are met:
+
+    1. Both dimensions (height and width) are divisible by 'factor'.
+    2. The total number of pixels is within the range ['min_pixels', 'max_pixels'].
+    3. The aspect ratio of the image is maintained as closely as possible.
+    """
+    max_pixels = max_pixels if max_pixels is not None else (IMAGE_MAX_TOKEN_NUM * factor ** 2)
+    min_pixels = min_pixels if min_pixels is not None else (IMAGE_MIN_TOKEN_NUM * factor ** 2)
+    assert max_pixels >= min_pixels, "The max_pixels of image must be greater than or equal to min_pixels."
+    if max(height, width) / min(height, width) > MAX_RATIO:
+        raise ValueError(
+            f"absolute aspect ratio must be smaller than {MAX_RATIO}, got {max(height, width) / min(height, width)}"
+        )
+    h_bar = max(factor, round_by_factor(height, factor))
+    w_bar = max(factor, round_by_factor(width, factor))
+    if h_bar * w_bar > max_pixels:
+        beta = math.sqrt((height * width) / max_pixels)
+        h_bar = floor_by_factor(height / beta, factor)
+        w_bar = floor_by_factor(width / beta, factor)
+    elif h_bar * w_bar < min_pixels:
+        beta = math.sqrt(min_pixels / (height * width))
+        h_bar = ceil_by_factor(height * beta, factor)
+        w_bar = ceil_by_factor(width * beta, factor)
+    return h_bar, w_bar
 
 
 def _encode_image(image_path: str) -> str:
@@ -97,7 +148,7 @@ def _is_qwen3_vl_model(model_name: str) -> bool:
 
 def _is_qwen25_vl_model(model_name: str) -> bool:
     name = (model_name or "").lower()
-    return "qwen2.5-vl" in name or "qwen25-vl" in name
+    return "qwen2.5-vl" in name or "qwen25-vl" in name or "mimo" in name or "ui-tars" in name
 
 
 def _convert_qwen3_vl_xy_to_pixels(action_obj: dict, before_state_path: str):
@@ -127,6 +178,34 @@ def _convert_qwen3_vl_xy_to_pixels(action_obj: dict, before_state_path: str):
     return action_obj
 
 
+def _convert_qwen25_vl_xy_to_pixels(action_obj: dict, before_state_path: str):
+    action_type = action_obj.get("action_type")
+    if action_type not in {"click", "long_press"}:
+        return action_obj
+    if "x" not in action_obj or "y" not in action_obj:
+        return action_obj
+
+    try:
+        x_norm = float(action_obj["x"])
+        y_norm = float(action_obj["y"])
+    except Exception:
+        return action_obj
+
+    with Image.open(before_state_path) as img:
+        width, height = img.size
+
+    resized_h, resized_w = smart_resize(height, width)
+    # Qwen2.5-VL grounding coordinates are normalized in resized image.
+    x_pixel = int(round((x_norm / resized_w) * width))
+    y_pixel = int(round((y_norm / resized_h) * height))
+    x_pixel = max(0, min(x_pixel, max(width - 1, 0)))
+    y_pixel = max(0, min(y_pixel, max(height - 1, 0)))
+
+    action_obj["x"] = x_pixel
+    action_obj["y"] = y_pixel
+    return action_obj
+
+
 def _postprocess_action_by_model(action_text: str, before_state_path: str):
     action_obj = _parse_action_json(action_text)
     if not isinstance(action_obj, dict):
@@ -137,9 +216,7 @@ def _postprocess_action_by_model(action_text: str, before_state_path: str):
     if _is_qwen3_vl_model(model_name):
         action_obj = _convert_qwen3_vl_xy_to_pixels(action_obj, before_state_path)
     elif _is_qwen25_vl_model(model_name):
-        # TODO: Qwen2.5-VL placeholder.
-        # Keep current output unchanged for now.
-        action_obj = action_obj
+        action_obj = _convert_qwen25_vl_xy_to_pixels(action_obj, before_state_path)
 
     return json.dumps(action_obj, ensure_ascii=False)
 
