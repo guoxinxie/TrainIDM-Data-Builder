@@ -1,55 +1,65 @@
 # Training Sample Generation
 
-Use this folder to convert split metadata into Qwen-style training JSON.
+Use this folder to convert split metadata into instruction-tuning JSON samples.
 
-## File
+## Which Script To Use
 
-- `generate_qwenvl_train.py`: converts MobileViews actions to Qwen-style action JSON and builds conversation samples.
+- `generate_rawpixel_train.py`
+  - Output action coordinates: raw image pixels.
+  - Use for legacy/general pixel-coordinate training targets.
 
-## What It Produces
+- `generate_qwen3vl_sft_train.py`
+  - Output action coordinates: normalized `[0, 1000]`.
+  - Use when training Qwen3-VL style data.
 
-Each sample has this format:
+- `generate_qwen25vl_sft_train.py`
+  - Output action coordinates: Qwen2.5-VL resized-grid coordinates.
+  - Use when training Qwen2.5-VL style data.
+
+## Renamed Files
+
+- `mv_for_sft_qwen3vl.py` -> `generate_qwen3vl_sft_train.py`
+- `mv_for_sft_qwen25vl.py` -> `generate_qwen25vl_sft_train.py`
+- `generate_qwenvl_train.py` -> `generate_rawpixel_train.py`
+
+## Shared Sample Format
 
 ```json
 {
   "image": ["path/to/before.jpg", "path/to/after.jpg"],
   "conversations": [
-    {"from": "human", "value": "<image>\n<image>\n..."},
+    {"from": "human", "value": "<image>\\n<image>\\n..."},
     {"from": "gpt", "value": "{\"action_type\": \"...\"}"}
   ]
 }
 ```
 
-## Important Config
+## Important Config (All Scripts)
 
-In `train/generate_qwenvl_train.py`, check:
 - `INPUT_SPLIT_CSV`
 - `OUTPUT_JSON`
 - `TARGET_SPLIT` (usually `train`)
 - `IMAGE_PREFIX`
 
-Current defaults are:
+All three scripts now use repo-relative defaults, for example:
 
 ```python
+TRAIN_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = TRAIN_DIR.parent
 INPUT_SPLIT_CSV = PROJECT_ROOT / "filtered_metadata_3rd" / "split.csv"
-OUTPUT_JSON = TRAIN_DIR / "split_train_qwenvl.json"
-TARGET_SPLIT = "train"
 IMAGE_PREFIX = PROJECT_ROOT / "mv_trace_en"
-```
-
-To build test JSON, change:
-
-```python
-TARGET_SPLIT = "test"
-OUTPUT_JSON = TRAIN_DIR / "split_test_qwenvl.json"
 ```
 
 ## Run
 
 ```bash
-python3 train/generate_qwenvl_train.py
+python3 train/generate_rawpixel_train.py
+python3 train/generate_qwen3vl_sft_train.py
+python3 train/generate_qwen25vl_sft_train.py
 ```
 
-## Output
+## Output Defaults
 
-- JSON file defined by `OUTPUT_JSON` (default: `train/split_train_qwenvl.json`).
+- `train/split_train_qwenvl.json`
+- `train/split_train_qwen3vl_sft.json`
+- `train/split_train_qwen25vl_sft.json`
