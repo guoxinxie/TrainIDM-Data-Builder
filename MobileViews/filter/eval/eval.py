@@ -31,10 +31,15 @@ def _resolve_test_metadata_csv() -> Path:
 
 CSV_PATH = _resolve_test_metadata_csv()
 TRACE_DIR = PROJECT_ROOT / "test_subset" / "mv_trace_en"
-AGENT_NAME = "remote_vlm"
+AGENT_NAME = "cot"
+AGENT_FILES = {
+    "cot": EVAL_DIR / "agent-cot.py",
+    "none-cot": EVAL_DIR / "agent-none-cot.py",
+    "som": EVAL_DIR / "agent-som.py",
+}
 OUTPUT_DIR = EVAL_DIR / "outputs"
-COMPARISON_CSV_PATH = OUTPUT_DIR / "eval_comparison_outputs.csv"
-ERROR_LOG_PATH = OUTPUT_DIR / "eval_agent_errors.log"
+COMPARISON_CSV_PATH = OUTPUT_DIR / AGENT_NAME / "eval_comparison_outputs.csv"
+ERROR_LOG_PATH = OUTPUT_DIR / AGENT_NAME / "eval_agent_errors.log"
 # Set to an integer (e.g. 1000) to cap test samples, or None for all samples.
 MAX_TEST_SAMPLES = None
 # Seed used when randomly selecting MAX_TEST_SAMPLES from all valid test samples.
@@ -45,6 +50,12 @@ MAX_WORKERS = 12
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate agent on extracted test subset.")
+    parser.add_argument(
+        "--agent",
+        choices=sorted(AGENT_FILES),
+        default=AGENT_NAME,
+        help=f"Agent to evaluate. Default: {AGENT_NAME}.",
+    )
     parser.add_argument(
         "-n",
         "--max-test-samples",
@@ -75,7 +86,7 @@ def parse_args():
         default=None,
         help=(
             "Comparison output CSV path or filename. "
-            "If only a filename is provided, it is saved under eval/outputs/."
+            "If only a filename is provided, it is saved under eval/outputs/<agent>/."
         ),
     )
     return parser.parse_args()
@@ -126,8 +137,10 @@ COMPARISON_FIELDNAMES = [
     "after_state_path",
     "ground_truth_action",
     "ground_truth_action_type",
+    "ground_truth_component_indices",
     "predicted_action",
     "predicted_action_type",
+    "predicted_component_index",
     "agent_ok",
     "agent_error",
     "agent_raw_output",
@@ -202,6 +215,48 @@ def _extract_bbox_from_ground_truth(ground_truth_action: str):
 def _is_in_bbox(x: int, y: int, bbox) -> bool:
     left, top, right, bottom = bbox
     return left <= x <= right and top <= y <= bottom
+
+
+def _state_json_path_from_screenshot(screenshot_path: str) -> Path:
+    path = Path(screenshot_path)
+    suffix = path.stem[len("screen_"):] if path.stem.startswith("screen_") else path.stem
+    return path.with_name(f"state_{suffix}.json")
+
+
+def _parse_view_bbox(view: Dict[str, Any]):
+    raw_bbox = view.get("bound_box")
+    if not isinstance(raw_bbox, str):
+        return None
+    parts = [part.strip() for part in raw_bbox.split(",")]
+    if len(parts) != 4 or not all(re.fullmatch(r"-?\d+", part) for part in parts):
+        return None
+    x1, y1, x2, y2 = map(int, parts)
+    return min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)
+
+
+def _extract_ground_truth_component_indices(
+    ground_truth_action: str, before_state_path: str
+) -> List[int]:
+    """Map the GT bbox to the exact view indexes shown to the SoM model."""
+    ground_truth_bbox = _extract_bbox_from_ground_truth(ground_truth_action)
+    if ground_truth_bbox is None:
+        return []
+    hierarchy_path = _state_json_path_from_screenshot(before_state_path)
+    try:
+        with open(hierarchy_path, "r", encoding="utf-8") as hierarchy_file:
+            views = json.load(hierarchy_file).get("views", [])
+    except Exception:
+        return []
+    return [
+        index
+        for index, view in enumerate(views)
+        if bool(view.get("visible", True))
+        and _parse_view_bbox(view) == ground_truth_bbox
+    ]
+
+
+def _extract_predicted_component_index(generated_action: str):
+    return _to_int(_parse_json_action(generated_action).get("index"))
 
 
 def _to_int(value: Any):
@@ -340,6 +395,50 @@ def evaluate_action(generated_action: str, ground_truth_action: str) -> bool:
     return False
 
 
+def evaluate_som_action(
+    generated_action: str,
+    ground_truth_action: str,
+    before_state_path: str,
+) -> bool:
+    """Evaluate SoM target actions by direct component-index equality."""
+    gen_obj = _parse_json_action(generated_action)
+    if not gen_obj:
+        return False
+    gen_type = str(gen_obj.get("action_type", "")).strip().lower()
+    gt_type = _extract_action_type(ground_truth_action)
+
+    if gen_type == "navigate_back":
+        return _is_navigate_back_ground_truth(ground_truth_action)
+    if gen_type == "wait":
+        return False
+
+    type_matches = {
+        "click": gt_type in {"touch", "unselect", "select"},
+        "input_text": gt_type in {"set_text", "input_text"},
+        "scroll": gt_type == "scroll",
+        "long_press": gt_type == "long_touch",
+    }
+    if not type_matches.get(gen_type, False):
+        return False
+
+    predicted_index = _to_int(gen_obj.get("index"))
+    ground_truth_indices = _extract_ground_truth_component_indices(
+        ground_truth_action, before_state_path
+    )
+    if predicted_index is None or predicted_index not in ground_truth_indices:
+        return False
+
+    if gen_type == "input_text":
+        return str(gen_obj.get("text", "")) == _extract_text_from_ground_truth(
+            ground_truth_action
+        )
+    if gen_type == "scroll":
+        return str(gen_obj.get("direction", "")).strip().lower() == (
+            _extract_scroll_direction_from_ground_truth(ground_truth_action)
+        )
+    return True
+
+
 def evaluate_action_type_match(generated_action: str, ground_truth_action: str) -> bool:
     gen_type = str(_parse_json_action(generated_action).get("action_type", "")).strip().lower()
     gt_type = _extract_action_type(ground_truth_action)
@@ -401,10 +500,21 @@ def extract_valid_true_samples(
     return samples
 
 
-def _load_agent_registry():
-    from agent import AGENT_REGISTRY
-
-    return AGENT_REGISTRY
+def _load_agent_registry(agent_name: str):
+    agent_path = AGENT_FILES[agent_name]
+    spec = importlib.util.spec_from_file_location(
+        f"eval_agent_{agent_name.replace('-', '_')}", str(agent_path)
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load agent from {agent_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    registry = getattr(module, "AGENT_REGISTRY", {})
+    if agent_name in registry:
+        return {agent_name: registry[agent_name]}
+    if len(registry) == 1:
+        return {agent_name: next(iter(registry.values()))}
+    raise ValueError(f"No callable registered for agent '{agent_name}' in {agent_path}")
 
 
 def _parse_bool(value):
@@ -456,7 +566,7 @@ def run_agents_on_samples(
     max_workers: int = MAX_WORKERS,
 ) -> List[Dict[str, Any]]:
     """Feed each sample to one selected agent in agent.py and collect raw outputs."""
-    AGENT_REGISTRY = _load_agent_registry()
+    AGENT_REGISTRY = _load_agent_registry(agent_name)
     if agent_name not in AGENT_REGISTRY:
         raise ValueError(f"Unknown agent: {agent_name}. Available: {list(AGENT_REGISTRY.keys())}")
 
@@ -507,10 +617,25 @@ def prepare_comparison_row(item: Dict[str, Any]) -> Dict[str, Any]:
         item.get("predicted_action", ""),
         item.get("ground_truth_action", ""),
     )
-    exact_action_match = evaluate_action(
-        item.get("predicted_action", ""),
-        item.get("ground_truth_action", ""),
-    )
+    if item.get("agent_name") == "som":
+        exact_action_match = evaluate_som_action(
+            item.get("predicted_action", ""),
+            item.get("ground_truth_action", ""),
+            item.get("before_state_path", ""),
+        )
+        ground_truth_component_indices = _extract_ground_truth_component_indices(
+            item.get("ground_truth_action", ""), item.get("before_state_path", "")
+        )
+        predicted_component_index = _extract_predicted_component_index(
+            item.get("predicted_action", "")
+        )
+    else:
+        exact_action_match = evaluate_action(
+            item.get("predicted_action", ""),
+            item.get("ground_truth_action", ""),
+        )
+        ground_truth_component_indices = []
+        predicted_component_index = None
     return {
         "sample_id": item.get("sample_id"),
         "agent_name": item.get("agent_name", ""),
@@ -519,8 +644,10 @@ def prepare_comparison_row(item: Dict[str, Any]) -> Dict[str, Any]:
         "after_state_path": item.get("after_state_path", ""),
         "ground_truth_action": item.get("ground_truth_action", ""),
         "ground_truth_action_type": item.get("ground_truth_action_type", ""),
+        "ground_truth_component_indices": json.dumps(ground_truth_component_indices),
         "predicted_action": item.get("predicted_action", ""),
         "predicted_action_type": item.get("predicted_action_type", ""),
+        "predicted_component_index": predicted_component_index,
         "agent_ok": item.get("agent_ok", False),
         "agent_error": item.get("agent_error", ""),
         "agent_raw_output": item.get("agent_raw_output", ""),
@@ -539,7 +666,7 @@ def run_agents_on_samples_stream_to_csv(
     Run inference and stream comparison rows to CSV during evaluation.
     Rows are flushed in input order as soon as each contiguous prefix is ready.
     """
-    AGENT_REGISTRY = _load_agent_registry()
+    AGENT_REGISTRY = _load_agent_registry(agent_name)
     if agent_name not in AGENT_REGISTRY:
         raise ValueError(f"Unknown agent: {agent_name}. Available: {list(AGENT_REGISTRY.keys())}")
 
@@ -668,14 +795,17 @@ if __name__ == "__main__":
         args.sample_seed if args.sample_seed is not None else SAMPLE_SELECTION_SEED
     )
     effective_max_workers = args.max_workers if args.max_workers is not None else MAX_WORKERS
+    effective_agent_name = args.agent
+    agent_output_dir = OUTPUT_DIR / effective_agent_name
     if args.output_csv:
         requested_output = Path(args.output_csv)
         if requested_output.parent == Path("."):
-            effective_comparison_csv = OUTPUT_DIR / requested_output.name
+            effective_comparison_csv = agent_output_dir / requested_output.name
         else:
             effective_comparison_csv = requested_output
     else:
-        effective_comparison_csv = COMPARISON_CSV_PATH
+        effective_comparison_csv = agent_output_dir / "eval_comparison_outputs.csv"
+    effective_error_log = agent_output_dir / "eval_agent_errors.log"
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -684,17 +814,24 @@ if __name__ == "__main__":
     # In sampling mode, always run fresh inference because subset selection can change.
     if effective_comparison_csv.exists() and not is_sampling_mode:
         cached_rows = load_comparison_fields_from_csv(effective_comparison_csv)
+        cached_agents = {row.get("agent_name", "") for row in cached_rows}
+        if cached_agents and cached_agents != {effective_agent_name}:
+            raise ValueError(
+                f"Cached CSV was produced by {sorted(cached_agents)}, not "
+                f"'{effective_agent_name}'. Choose another --output-csv."
+            )
         rows = prepare_comparison_fields(cached_rows)
         dump_comparison_fields_to_csv(rows, effective_comparison_csv)
 
         print(f"Found existing comparison CSV: {effective_comparison_csv}")
         print("Skipped model inference. Re-evaluated using cached predictions.")
+        print(f"Agent: {effective_agent_name}")
         print(f"Max test samples: {effective_max_test_samples}")
         print(f"Sample seed: {effective_sample_seed} (ignored when max test samples is None)")
         print(f"Max workers: {effective_max_workers}")
         print(f"Prepared comparison rows: {len(rows)}")
         print(f"Saved comparison CSV: {effective_comparison_csv}")
-        log_agent_errors(cached_rows, ERROR_LOG_PATH)
+        log_agent_errors(cached_rows, effective_error_log)
     else:
         samples = extract_valid_true_samples(
             CSV_PATH,
@@ -705,10 +842,11 @@ if __name__ == "__main__":
         outputs = run_agents_on_samples_stream_to_csv(
             samples=samples,
             csv_path=effective_comparison_csv,
-            agent_name=AGENT_NAME,
+            agent_name=effective_agent_name,
             max_workers=effective_max_workers,
         )
 
+        print(f"Agent: {effective_agent_name}")
         print(f"Loaded valid samples: {len(samples)}")
         print(f"Max test samples: {effective_max_test_samples}")
         print(f"Sample seed: {effective_sample_seed}")
@@ -716,4 +854,4 @@ if __name__ == "__main__":
         print(f"Agent outputs: {len(outputs)}")
         print(f"Prepared comparison rows: {len(outputs)}")
         print(f"Saved comparison CSV: {effective_comparison_csv}")
-        log_agent_errors(outputs, ERROR_LOG_PATH)
+        log_agent_errors(outputs, effective_error_log)

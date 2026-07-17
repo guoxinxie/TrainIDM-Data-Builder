@@ -1,109 +1,161 @@
-# Evaluation Guide
+# IDM Agent Evaluation
 
-Use this folder to evaluate IDM agent performance on the extracted test subset.
+本目录包含三个 agent，其中 none-cot 沿用之前版本中 agent.py 的逻辑：
 
-## Files
+| CLI 名称 | 文件 | 输出方式 | Evaluation |
+| --- | --- | --- | --- |
+| `cot` | `agent-cot.py` | 显式 CoT，然后输出像素 action JSON | 像素坐标评估 |
+| `none-cot` | `agent-none-cot.py` | 直接输出像素 action JSON | 像素坐标评估 |
+| `som` | `agent-som.py` | 直接输出 component index action JSON | 直接比较 component index |
 
-- `eval.py`: main evaluation entrypoint.
-- `agent.py`: model inference agent used by evaluation.
-- `generate_eval_preview.py`: HTML preview for evaluation outputs.
-- `filter_infeasible_samples.py`: remove marked infeasible samples from `test_subset/split_test.csv`.
-- `navigate_back_alt_list.py`: aliases for matching `navigate_back`.
-- `outputs/`: generated eval CSV/HTML.
-
-## Default Inputs/Outputs
-
-`eval.py` uses:
-- Input metadata: `test_subset/split_test.csv` (fallback: `test_subset/split_test`)
-- Input traces: `test_subset/mv_trace_en`
-- Output CSV: `eval/outputs/eval_comparison_outputs.csv`
-
-`generate_eval_preview.py` uses:
-- Input CSV: `eval/outputs/eval_comparison_outputs.csv`
-- Output HTML: `eval/outputs/eval_comparison_preview.html`
-
-## Requirements
+以下命令均从 `MobileViews/filter` 目录运行：
 
 ```bash
-pip install requests pillow
+cd /path/to/TrainIDM-Data-Builder/MobileViews/filter
+python3 -m pip install requests pillow tqdm
 ```
 
-Set model environment variables before running:
+SoM 要求 before screenshot 旁边存在对应的 view hierarchy，例如：
+
+```text
+screen_12.jpg -> state_12.json
+```
+
+## 使用 OpenRouter
+
+设置 OpenRouter API key 和多模态模型：
 
 ```bash
-export API_KEY="your_key"
 export API_URL="https://openrouter.ai/api/v1/chat/completions"
-export MODEL="qwen/qwen3-vl-30b-a3b-instruct"
+export API_KEY="<openrouter-api-key>"
+export MODEL="<openrouter-multimodal-model-slug>"
 ```
 
-## Run Evaluation
-
-Run all test samples:
+运行三个 agent：
 
 ```bash
-python3 eval/eval.py
+python3 eval/eval.py --agent cot --output-csv openrouter_run.csv
+python3 eval/eval.py --agent none-cot --output-csv openrouter_run.csv
+python3 eval/eval.py --agent som --output-csv openrouter_run.csv
 ```
 
-Run only part of test samples:
+结果分别保存到：
 
-```bash
-python3 eval/eval.py -n 1000
+```text
+eval/outputs/cot/openrouter_run.csv
+eval/outputs/none-cot/openrouter_run.csv
+eval/outputs/som/openrouter_run.csv
 ```
 
-Run a random subset with a fixed seed:
+## 使用本地 vLLM
+
+启动支持图片输入的本地模型：
 
 ```bash
-python3 eval/eval.py -n 1000 -s 91010
+vllm serve <vision-model-or-local-path> \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --served-model-name mobile-vlm
 ```
 
-Defaults can also be configured directly in `eval/eval.py`:
-- `MAX_TEST_SAMPLES`
-- `SAMPLE_SELECTION_SEED`
-
-## Generate Eval Preview
+设置本地 endpoint：
 
 ```bash
-python3 eval/generate_eval_preview.py
+export API_URL="http://127.0.0.1:8000/v1/chat/completions"
+export API_KEY=""
+export MODEL="mobile-vlm"
 ```
 
-For cross-model summary CSV (`any_model_matched` / `all_models_not_matched`):
+运行三个 agent：
 
 ```bash
-python3 eval/build_cross_model_correctness_csv.py
+python3 eval/eval.py --agent cot --output-csv local_vllm_run.csv
+python3 eval/eval.py --agent none-cot --output-csv local_vllm_run.csv
+python3 eval/eval.py --agent som --output-csv local_vllm_run.csv
+```
+
+结果分别保存到：
+
+```text
+eval/outputs/cot/local_vllm_run.csv
+eval/outputs/none-cot/local_vllm_run.csv
+eval/outputs/som/local_vllm_run.csv
+```
+
+## Evaluation
+
+`eval.py` 会在模型推理完成后立即执行对应的 evaluation：
+
+- `cot` 和 `none-cot` 使用原有像素坐标评估。
+- `som` 直接比较预测 component index 与 ground-truth component index，不把 index 转换为坐标。
+
+因此，上面的 agent 命令执行完成后，输出 CSV 已经包含：
+
+```text
+action_type_match
+exact_action_match
+```
+
+SoM CSV 还包含：
+
+```text
+ground_truth_component_indices
+predicted_component_index
+```
+
+### 重新评估已有输出
+
+如果输出 CSV 已存在，再次运行相同命令且不指定 `-n`，程序会跳过模型推理，只重新计算
+evaluation 字段。
+
+OpenRouter 结果：
+
+```bash
+python3 eval/eval.py --agent cot --output-csv openrouter_run.csv
+python3 eval/eval.py --agent none-cot --output-csv openrouter_run.csv
+python3 eval/eval.py --agent som --output-csv openrouter_run.csv
+```
+
+本地 vLLM 结果：
+
+```bash
+python3 eval/eval.py --agent cot --output-csv local_vllm_run.csv
+python3 eval/eval.py --agent none-cot --output-csv local_vllm_run.csv
+python3 eval/eval.py --agent som --output-csv local_vllm_run.csv
+```
+
+看到以下输出表示使用了已有预测，没有重新调用模型：
+
+```text
+Skipped model inference. Re-evaluated using cached predictions.
+```
+
+如果首次运行使用了采样参数，例如：
+
+```bash
+python3 eval/eval.py --agent som -n 1000 -s 91010 --output-csv som_1000.csv
+```
+
+重新评估该 CSV 时需要去掉 `-n`：
+
+```bash
+python3 eval/eval.py --agent som --output-csv som_1000.csv
+```
+
+### 生成 HTML 预览
+
+例如为三个 OpenRouter 结果生成预览：
+
+```bash
 python3 eval/generate_eval_preview.py \
-  --csv eval/outputs/cross_model_analysis/all_models_correctness.csv \
-  --match-column any_model_matched \
-  --output eval/outputs/cross_model_analysis/all_models_correctness_preview.html
+  --csv eval/outputs/cot/openrouter_run.csv \
+  --output eval/outputs/cot/openrouter_run_preview.html
+
+python3 eval/generate_eval_preview.py \
+  --csv eval/outputs/none-cot/openrouter_run.csv \
+  --output eval/outputs/none-cot/openrouter_run_preview.html
+
+python3 eval/generate_eval_preview.py \
+  --csv eval/outputs/som/openrouter_run.csv \
+  --output eval/outputs/som/openrouter_run_preview.html
 ```
-
-Open:
-- `eval/outputs/eval_comparison_preview.html`
-
-## Mark Infeasible Samples (Human Review)
-
-In `eval_comparison_preview.html`:
-- Use `Mark Infeasible` / `Unmark Infeasible` while browsing samples.
-- Marks are saved in browser `localStorage`.
-- Use `Export Marks JSON` (recommended) or `Export Marks TXT`.
-
-Then move exported file (for example `infeasible_marks.json`) to:
-- `eval/outputs/infeasible_marks.json`
-
-## Filter Marked Samples Out of Test Set
-
-```bash
-python3 eval/filter_infeasible_samples.py
-```
-
-Outputs:
-- `test_subset/split_test_feasible.csv`
-- `test_subset/split_test_infeasible.csv`
-- `eval/outputs/infeasible_filter_summary.txt`
-
-For repeated human-review rounds, run one command:
-
-```bash
-bash eval/apply_infeasible_marks.sh
-```
-
-This will backup `split_test.csv`, apply filtering, replace `split_test.csv` with feasible rows, and archive removed rows with a timestamp.
